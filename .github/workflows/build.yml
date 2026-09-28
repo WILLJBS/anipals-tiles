@@ -134,6 +134,13 @@ jobs:
           gh release create "$TAG" valhalla.tar --title "$TAG" --notes "Valhalla pedestrian tiles for Europe (merged country builds). OSM-derived (ODbL)."
           echo "release_tag: $TAG" | tee -a calib.txt
           echo "asset_url: https://github.com/${{ github.repository }}/releases/download/${TAG}/valhalla.tar" | tee -a calib.txt
+          # persist the exact runtime config next to the deploy image (paths are
+          # already container paths: /data/valhalla.tar)
+          mkdir -p runtime
+          cp valhalla_config.json runtime/valhalla_config.json
+          git add runtime/valhalla_config.json
+          git commit -m "runtime config for ${TAG}" || echo "config unchanged"
+          git push
       - name: Upload to R2 (optional)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
