@@ -58,7 +58,7 @@ jobs:
           # file-type check below is the real gate
           curl -sfL --retry 5 --retry-all-errors "https://download.geofabrik.de/${REGION}-latest.osm.pbf" -o raw.osm.pbf
           file raw.osm.pbf | tee -a calib.txt
-          file raw.osm.pbf | grep -q "OSM PBF" || { echo "download is not a pbf (rate-limited?)"; exit 1; }
+          file raw.osm.pbf | grep -qiE "OSM PBF|Protocolbuffer" || { echo "download is not a pbf (rate-limited?)"; exit 1; }
           ls -lh raw.osm.pbf | tee -a calib.txt
           osmium tags-filter raw.osm.pbf -o filtered.osm.pbf w/highway w/route=ferry r/boundary=administrative
           ls -lh filtered.osm.pbf | tee -a calib.txt
