@@ -19,7 +19,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: valhalla-tiles-build
+  group: valhalla-tiles-v2
   cancel-in-progress: true
 jobs:
   setup:
@@ -66,6 +66,10 @@ REGIONS='{"region":[{"region":"europe/france","slug":"europe-france"}, {"region"
           ls -lh filtered.osm.pbf | tee -a calib.txt
       - name: Build Valhalla tiles
         run: |
+          # valhalla_build_tiles on big countries (FR/DE ~2GB filtered) spikes
+          # past the 7GB runner RAM — a swap file keeps it from hanging forever
+          sudo fallocate -l 10G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          free -h | tee -a calib.txt
           mkdir -p tiles
           docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest valhalla_build_config \
             --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 2 \
