@@ -35,7 +35,7 @@ jobs:
           # ferry routes and the admin boundaries valhalla_build_admins needs.
           sudo apt-get install -y -qq osmium-tool
           curl -sfL --retry 3 "https://download.geofabrik.de/${REGION}-latest.osm.pbf" \
-            | osmium tags-filter - -o filtered.osm.pbf -w highway -w route=ferry -r boundary=administrative
+            | osmium tags-filter - -o filtered.osm.pbf w/highway w/route=ferry r/boundary=administrative
           ls -lh filtered.osm.pbf | tee -a calib.txt
       - name: Build Valhalla tiles (timed, peak RSS recorded)
         run: |
