@@ -87,7 +87,7 @@ jobs:
           tar -cf "tiles-${{ matrix.region.slug }}.tar" tiles
           # big countries (US: tiles 55 min, ~15 GB peak RSS) exhaust the 14 GB
           # runner disk — drop intermediates the moment the tar exists
-          rm -rf tiles raw.osm.pbf filtered.osm.pbf build.log
+          sudo rm -rf tiles raw.osm.pbf filtered.osm.pbf build.log
           df -h / | tail -1 | tee -a calib.txt
       - name: Upload country tiles
         uses: actions/upload-artifact@v4
