@@ -2,17 +2,18 @@ name: valhalla-tiles-build
 # AniPals pedestrian navigation tiles (ADR-PLAY-11 in the private anipals-app
 # repo). OSM-derived data, ODbL — public repo on purpose: free Actions minutes
 # and a public Release asset that the Render service can pull without
-# credentials. Builds one Geofabrik region per run (dispatch input), records
-# calibration numbers (wall time / peak RSS / tile size / query latency) into
-# calibration/, and uploads valhalla.tar to a GitHub Release (plus R2 when the
-# bucket secrets are configured).
+# credentials.
+#
+# Continent extracts are built per-country in a matrix (each country pbf fits
+# the runner disk and RAM; whole-continent pbf/streams do not), then the per-
+# country tile dirs are merged and packed into one valhalla.tar Release.
 on:
   workflow_dispatch:
     inputs:
-      region:
-        description: 'Geofabrik region id, e.g. europe, asia or europe/iceland'
-        required: true
-        default: 'europe'
+      note:
+        description: 'Optional note; the country set lives in the matrix below'
+        required: false
+        default: ''
   push:
     paths: ['.github/workflows/build.yml']
 permissions:
@@ -23,47 +24,93 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        region:
+          - { region: 'europe/france', slug: 'europe-france' }
+          - { region: 'europe/germany', slug: 'europe-germany' }
+          - { region: 'europe/united-kingdom', slug: 'europe-united-kingdom' }
+          - { region: 'europe/spain', slug: 'europe-spain' }
+          - { region: 'europe/italy', slug: 'europe-italy' }
+          - { region: 'europe/netherlands', slug: 'europe-netherlands' }
+          - { region: 'europe/belgium', slug: 'europe-belgium' }
+          - { region: 'europe/austria', slug: 'europe-austria' }
+          - { region: 'europe/switzerland', slug: 'europe-switzerland' }
+          - { region: 'europe/portugal', slug: 'europe-portugal' }
+          - { region: 'europe/poland', slug: 'europe-poland' }
+          - { region: 'europe/czech-republic', slug: 'europe-czech-republic' }
+          - { region: 'europe/hungary', slug: 'europe-hungary' }
+          - { region: 'europe/romania', slug: 'europe-romania' }
+          - { region: 'europe/greece', slug: 'europe-greece' }
+          - { region: 'europe/sweden', slug: 'europe-sweden' }
+          - { region: 'europe/norway', slug: 'europe-norway' }
+          - { region: 'europe/denmark', slug: 'europe-denmark' }
+          - { region: 'europe/finland', slug: 'europe-finland' }
+          - { region: 'europe/ireland', slug: 'europe-ireland' }
     steps:
       - uses: actions/checkout@v4
-      - name: Download region pbf (stream-filtered to walkable ways)
+      - name: Download and filter country pbf
         run: |
-          REGION="${{ github.event.inputs.region || 'europe' }}"
+          REGION="${{ matrix.region.region }}"
           echo "building region: $REGION" | tee calib.txt
-          echo "run_number: ${{ github.run_number }}" | tee -a calib.txt
-          # Continent extracts exceed the runner disk (~14 GB) — stream-filter
-          # on download instead of storing the raw pbf. Keeps walkable ways,
-          # ferry routes and the admin boundaries valhalla_build_admins needs.
           sudo apt-get install -y -qq osmium-tool
-          curl -sfL --retry 3 "https://download.geofabrik.de/${REGION}-latest.osm.pbf" \
-            | osmium tags-filter -o filtered.osm.pbf -F pbf --overwrite - w/highway w/route=ferry r/boundary=administrative
+          curl -sfL --retry 3 "https://download.geofabrik.de/${REGION}-latest.osm.pbf" -o raw.osm.pbf
+          ls -lh raw.osm.pbf | tee -a calib.txt
+          osmium tags-filter raw.osm.pbf -o filtered.osm.pbf w/highway w/route=ferry r/boundary=administrative
           ls -lh filtered.osm.pbf | tee -a calib.txt
-      - name: Build Valhalla tiles (timed, peak RSS recorded)
+      - name: Build Valhalla tiles
         run: |
           mkdir -p tiles
           docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest valhalla_build_config \
             --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 2 \
             > valhalla_config.json
-          # pin the extract path via json — the CLI flag name varies across versions
-          python3 -c "import json;c=json.load(open('valhalla_config.json'));c['mjolnir']['tile_extract']='/data/valhalla.tar';json.dump(c,open('valhalla_config.json','w'))"
-          # One container for the whole pipeline: the image lacks GNU time, so we
-          # install it once here; set -e + pipefail so a failing build step can
-          # no longer be masked by the tee/grep pipeline.
           set -o pipefail
           docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest bash -c '
             set -e -o pipefail
             apt-get update -qq && apt-get install -y -qq time >/dev/null
             echo "=== admins ==="
-            /usr/bin/time -v valhalla_build_admins -c /data/valhalla_config.json /data/filtered.osm.pbf 2>&1 | tail -20
+            /usr/bin/time -v valhalla_build_admins -c /data/valhalla_config.json /data/filtered.osm.pbf 2>&1 | tail -12
             echo "=== tiles ==="
-            /usr/bin/time -v valhalla_build_tiles -c /data/valhalla_config.json /data/filtered.osm.pbf 2>&1 | tail -25
-            echo "=== extract ==="
-            valhalla_build_extract -c /data/valhalla_config.json
-            echo "=== pipeline done ==="
+            /usr/bin/time -v valhalla_build_tiles -c /data/valhalla_config.json /data/filtered.osm.pbf 2>&1 | tail -20
+            echo "=== country pipeline done ==="
           ' 2>&1 | tee build.log
           grep -E "=== |Maximum resident|Elapsed \(wall|CRITICAL" build.log | tee -a calib.txt
-          du -sh tiles valhalla.tar | tee -a calib.txt
-      - name: Smoke query through valhalla_service
+          du -sh tiles | tee -a calib.txt
+          tar -cf "tiles-${{ matrix.region.slug }}.tar" tiles
+      - name: Upload country tiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiles-${{ matrix.region.slug }}
+          path: tiles-*.tar
+          retention-days: 3
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all country tiles
+        uses: actions/download-artifact@v4
+        with:
+          path: parts
+          merge-multiple: false
+      - name: Merge, extract, smoke, publish
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -e
+          mkdir -p tiles
+          # every country tar carries a tiles/ prefix; extracting them all into
+          # the same tree merges the graphs (tile files never collide)
+          for f in parts/*/tiles-*.tar; do tar -xf "$f" -C .; done
+          du -sh tiles | tee -a calib.txt
+          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest valhalla_build_config \
+            --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 2 > valhalla_config.json
+          python3 -c "import json;c=json.load(open('valhalla_config.json'));c['mjolnir']['tile_extract']='/data/valhalla.tar';json.dump(c,open('valhalla_config.json','w'))"
+          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest \
+            valhalla_build_extract -c /data/valhalla_config.json
+          du -sh valhalla.tar | tee -a calib.txt
+          # Paris smoke (Louvre → Eiffel): exercises the merged European graph
           docker run -d --name valhalla-smoke -p 8002:8002 -v "$PWD:/data" \
             valhalla/valhalla:run-latest valhalla_service /data/valhalla_config.json 1
           for i in $(seq 1 60); do
@@ -76,21 +123,15 @@ jobs:
           fi
           START=$(date +%s%N)
           if curl -sf "http://127.0.0.1:8002/route" -H 'content-type: application/json' \
-            -d '{"locations":[{"lat":64.1466,"lon":-21.9426},{"lat":64.1434,"lon":-21.9165}],"costing":"pedestrian","directions_type":"none"}' \
+            -d '{"locations":[{"lat":48.8606,"lon":2.3376},{"lat":48.8584,"lon":2.2945}],"costing":"pedestrian","directions_type":"none"}' \
             -o smoke_route.json; then echo "route query OK" | tee -a calib.txt
           else echo "route query FAILED" | tee -a calib.txt; fi
           END=$(date +%s%N)
           echo "query_ms=$(( (END-START)/1000000 ))" | tee -a calib.txt
           python3 -c "import json;t=json.load(open('smoke_route.json'))['trip'];print('length_km',t['summary']['length'],'legs',len(t['legs']))" | tee -a calib.txt || true
           docker rm -f valhalla-smoke
-      - name: Publish Release with tiles
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          REGION="${{ github.event.inputs.region || 'europe' }}"
-          SLUG=$(echo "$REGION" | tr '/' '-')
-          TAG="tiles-${SLUG}-$(date -u +%Y%m%d)-${{ github.run_number }}"
-          gh release create "$TAG" valhalla.tar --title "$TAG" --notes "Valhalla pedestrian tiles for ${REGION}. OSM-derived (ODbL). Calibration in calibration/${SLUG}.md"
+          TAG="tiles-europe-$(date -u +%Y%m%d)-${{ github.run_number }}"
+          gh release create "$TAG" valhalla.tar --title "$TAG" --notes "Valhalla pedestrian tiles for Europe (merged country builds). OSM-derived (ODbL)."
           echo "release_tag: $TAG" | tee -a calib.txt
           echo "asset_url: https://github.com/${{ github.repository }}/releases/download/${TAG}/valhalla.tar" | tee -a calib.txt
       - name: Upload to R2 (optional)
@@ -100,23 +141,19 @@ jobs:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
         run: |
           if [ -z "$AWS_ACCESS_KEY_ID" ]; then echo "r2: secrets not set, skipped" | tee -a calib.txt; exit 0; fi
-          REGION="${{ github.event.inputs.region || 'europe' }}"
-          SLUG=$(echo "$REGION" | tr '/' '-')
-          aws s3 cp valhalla.tar "s3://anipals-valhalla-tiles/${SLUG}/$(date -u +%Y%m%d)-${{ github.run_number }}/valhalla.tar" --endpoint-url "$R2_ENDPOINT"
+          aws s3 cp valhalla.tar "s3://anipals-valhalla-tiles/europe/$(date -u +%Y%m%d)-${{ github.run_number }}/valhalla.tar" --endpoint-url "$R2_ENDPOINT"
           echo "r2: uploaded" | tee -a calib.txt
       - name: Commit calibration report
         run: |
-          REGION="${{ github.event.inputs.region || 'europe' }}"
-          SLUG=$(echo "$REGION" | tr '/' '-')
           {
-            echo "# navigation tiles calibration — $REGION"
+            echo "# navigation tiles calibration — europe (merged country builds)"
             echo "- run: ${{ github.run_number }} @ $(date -u '+%FT%TZ')"
             echo '```'
             cat calib.txt
             echo '```'
-          } > "calibration/${SLUG}.md"
+          } > "calibration/europe.md"
           git config user.name "anipals-ci"
           git config user.email "ci@anipals.app"
           git add calibration
-          git commit -m "calibration: ${REGION} (run ${{ github.run_number }})" || echo "no changes"
+          git commit -m "calibration: europe (run ${{ github.run_number }})" || echo "no changes"
           git push
