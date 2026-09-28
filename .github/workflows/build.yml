@@ -40,14 +40,22 @@ jobs:
             > valhalla_config.json
           # pin the extract path via json — the CLI flag name varies across versions
           python3 -c "import json;c=json.load(open('valhalla_config.json'));c['mjolnir']['tile_extract']='/data/valhalla.tar';json.dump(c,open('valhalla_config.json','w'))"
-          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest \
-            /usr/bin/time -v valhalla_build_admins -c /data/valhalla_config.json /data/raw.osm.pbf \
-            2>&1 | grep -E "Maximum resident|Elapsed \(wall" | sed 's/^/admins /' | tee -a calib.txt
-          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest \
-            /usr/bin/time -v valhalla_build_tiles -s -c /data/valhalla_config.json /data/raw.osm.pbf \
-            2>&1 | grep -E "Maximum resident|Elapsed \(wall" | sed 's/^/tiles /' | tee -a calib.txt
-          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest \
+          # One container for the whole pipeline: the image lacks GNU time, so we
+          # install it once here; set -e + pipefail so a failing build step can
+          # no longer be masked by the tee/grep pipeline.
+          set -o pipefail
+          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest bash -c '
+            set -e
+            apt-get update -qq && apt-get install -y -qq time >/dev/null
+            echo "=== admins ==="
+            /usr/bin/time -v valhalla_build_admins -c /data/valhalla_config.json /data/raw.osm.pbf 2>&1 | tail -20
+            echo "=== tiles ==="
+            /usr/bin/time -v valhalla_build_tiles -s -c /data/valhalla_config.json /data/raw.osm.pbf 2>&1 | tail -25
+            echo "=== extract ==="
             valhalla_build_extract -c /data/valhalla_config.json
+            echo "=== pipeline done ==="
+          ' 2>&1 | tee build.log
+          grep -E "=== |Maximum resident|Elapsed \(wall|CRITICAL" build.log | tee -a calib.txt
           du -sh tiles valhalla.tar | tee -a calib.txt
       - name: Smoke query through valhalla_service
         run: |
