@@ -60,11 +60,15 @@ jobs:
       - name: Smoke query through valhalla_service
         run: |
           docker run -d --name valhalla-smoke -p 8002:8002 -v "$PWD:/data" \
-            valhalla/valhalla:run-latest valhalla_service /data/valhalla.tar 1
+            valhalla/valhalla:run-latest valhalla_service /data/valhalla_config.json 1
           for i in $(seq 1 60); do
             sleep 2
             if curl -sf "http://127.0.0.1:8002/status" > /dev/null; then echo "service up after $((i*2))s" | tee -a calib.txt; break; fi
           done
+          if ! curl -sf "http://127.0.0.1:8002/status" > /dev/null; then
+            echo "service never came up; last logs:" | tee -a calib.txt
+            docker logs valhalla-smoke 2>&1 | tail -12 | tee -a calib.txt
+          fi
           START=$(date +%s%N)
           if curl -sf "http://127.0.0.1:8002/route" -H 'content-type: application/json' \
             -d '{"locations":[{"lat":64.1466,"lng":-21.9426},{"lat":64.1434,"lng":-21.9165}],"costing":"pedestrian","directions_type":"none"}' \
