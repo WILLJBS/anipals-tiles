@@ -34,6 +34,7 @@ jobs:
           ls -lh raw.osm.pbf | tee -a calib.txt
       - name: Build Valhalla tiles (timed, peak RSS recorded)
         run: |
+          mkdir -p tiles
           docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest valhalla_build_config \
             --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 2 \
             > valhalla_config.json
