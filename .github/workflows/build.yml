@@ -35,8 +35,10 @@ jobs:
       - name: Build Valhalla tiles (timed, peak RSS recorded)
         run: |
           docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest valhalla_build_config \
-            --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 2 --mjolnir-extract /data/valhalla.tar \
+            --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 2 \
             > valhalla_config.json
+          # pin the extract path via json — the CLI flag name varies across versions
+          python3 -c "import json;c=json.load(open('valhalla_config.json'));c['mjolnir']['tile_extract']='/data/valhalla.tar';json.dump(c,open('valhalla_config.json','w'))"
           docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest \
             /usr/bin/time -v valhalla_build_admins -c /data/valhalla_config.json /data/raw.osm.pbf \
             2>&1 | grep -E "Maximum resident|Elapsed \(wall" | sed 's/^/admins /' | tee -a calib.txt
