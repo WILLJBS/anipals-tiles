@@ -71,7 +71,7 @@ jobs:
           fi
           START=$(date +%s%N)
           if curl -sf "http://127.0.0.1:8002/route" -H 'content-type: application/json' \
-            -d '{"locations":[{"lat":64.1466,"lng":-21.9426},{"lat":64.1434,"lng":-21.9165}],"costing":"pedestrian","directions_type":"none"}' \
+            -d '{"locations":[{"lat":64.1466,"lon":-21.9426},{"lat":64.1434,"lon":-21.9165}],"costing":"pedestrian","directions_type":"none"}' \
             -o smoke_route.json; then echo "route query OK" | tee -a calib.txt
           else echo "route query FAILED" | tee -a calib.txt; fi
           END=$(date +%s%N)
