@@ -1,0 +1,102 @@
+name: valhalla-tiles-build
+# AniPals pedestrian navigation tiles (ADR-PLAY-11 in the private anipals-app
+# repo). OSM-derived data, ODbL — public repo on purpose: free Actions minutes
+# and a public Release asset that the Render service can pull without
+# credentials. Builds one Geofabrik region per run (dispatch input), records
+# calibration numbers (wall time / peak RSS / tile size / query latency) into
+# calibration/, and uploads valhalla.tar to a GitHub Release (plus R2 when the
+# bucket secrets are configured).
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: 'Geofabrik region id, e.g. europe/iceland or asia/china'
+        required: true
+        default: 'europe/iceland'
+  push:
+    paths: ['.github/workflows/build.yml']
+permissions:
+  contents: write
+concurrency:
+  group: valhalla-tiles-build
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download region pbf
+        run: |
+          REGION="${{ github.event.inputs.region || 'europe/iceland' }}"
+          echo "building region: $REGION" | tee calib.txt
+          echo "run_number: ${{ github.run_number }}" | tee -a calib.txt
+          curl -sfL --retry 3 "https://download.geofabrik.de/${REGION}-latest.osm.pbf" -o raw.osm.pbf
+          ls -lh raw.osm.pbf | tee -a calib.txt
+      - name: Build Valhalla tiles (timed, peak RSS recorded)
+        run: |
+          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest valhalla_build_config \
+            --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 2 --mjolnir-extract /data/valhalla.tar \
+            > valhalla_config.json
+          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest \
+            /usr/bin/time -v valhalla_build_admins -c /data/valhalla_config.json /data/raw.osm.pbf \
+            2>&1 | grep -E "Maximum resident|Elapsed \(wall" | sed 's/^/admins /' | tee -a calib.txt
+          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest \
+            /usr/bin/time -v valhalla_build_tiles -s -c /data/valhalla_config.json /data/raw.osm.pbf \
+            2>&1 | grep -E "Maximum resident|Elapsed \(wall" | sed 's/^/tiles /' | tee -a calib.txt
+          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest \
+            valhalla_build_extract -c /data/valhalla_config.json
+          du -sh tiles valhalla.tar | tee -a calib.txt
+      - name: Smoke query through valhalla_service
+        run: |
+          docker run -d --name valhalla-smoke -p 8002:8002 -v "$PWD:/data" \
+            valhalla/valhalla:run-latest valhalla_service /data/valhalla.tar 1
+          for i in $(seq 1 60); do
+            sleep 2
+            if curl -sf "http://127.0.0.1:8002/status" > /dev/null; then echo "service up after $((i*2))s" | tee -a calib.txt; break; fi
+          done
+          START=$(date +%s%N)
+          if curl -sf "http://127.0.0.1:8002/route" -H 'content-type: application/json' \
+            -d '{"locations":[{"lat":64.1466,"lng":-21.9426},{"lat":64.1434,"lng":-21.9165}],"costing":"pedestrian","directions_type":"none"}' \
+            -o smoke_route.json; then echo "route query OK" | tee -a calib.txt
+          else echo "route query FAILED" | tee -a calib.txt; fi
+          END=$(date +%s%N)
+          echo "query_ms=$(( (END-START)/1000000 ))" | tee -a calib.txt
+          python3 -c "import json;t=json.load(open('smoke_route.json'))['trip'];print('length_km',t['summary']['length'],'legs',len(t['legs']))" | tee -a calib.txt || true
+          docker rm -f valhalla-smoke
+      - name: Publish Release with tiles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REGION="${{ github.event.inputs.region || 'europe/iceland' }}"
+          SLUG=$(echo "$REGION" | tr '/' '-')
+          TAG="tiles-${SLUG}-$(date -u +%Y%m%d)-${{ github.run_number }}"
+          gh release create "$TAG" valhalla.tar --title "$TAG" --notes "Valhalla pedestrian tiles for ${REGION}. OSM-derived (ODbL). Calibration in calibration/${SLUG}.md"
+          echo "release_tag: $TAG" | tee -a calib.txt
+          echo "asset_url: https://github.com/${{ github.repository }}/releases/download/${TAG}/valhalla.tar" | tee -a calib.txt
+      - name: Upload to R2 (optional)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then echo "r2: secrets not set, skipped" | tee -a calib.txt; exit 0; fi
+          REGION="${{ github.event.inputs.region || 'europe/iceland' }}"
+          SLUG=$(echo "$REGION" | tr '/' '-')
+          aws s3 cp valhalla.tar "s3://anipals-valhalla-tiles/${SLUG}/$(date -u +%Y%m%d)-${{ github.run_number }}/valhalla.tar" --endpoint-url "$R2_ENDPOINT"
+          echo "r2: uploaded" | tee -a calib.txt
+      - name: Commit calibration report
+        run: |
+          REGION="${{ github.event.inputs.region || 'europe/iceland' }}"
+          SLUG=$(echo "$REGION" | tr '/' '-')
+          {
+            echo "# navigation tiles calibration — $REGION"
+            echo "- run: ${{ github.run_number }} @ $(date -u '+%FT%TZ')"
+            echo '```'
+            cat calib.txt
+            echo '```'
+          } > "calibration/${SLUG}.md"
+          git config user.name "anipals-ci"
+          git config user.email "ci@anipals.app"
+          git add calibration
+          git commit -m "calibration: ${REGION} (run ${{ github.run_number }})" || echo "no changes"
+          git push
