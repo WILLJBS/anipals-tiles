@@ -45,12 +45,12 @@ jobs:
           # no longer be masked by the tee/grep pipeline.
           set -o pipefail
           docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest bash -c '
-            set -e
+            set -e -o pipefail
             apt-get update -qq && apt-get install -y -qq time >/dev/null
             echo "=== admins ==="
             /usr/bin/time -v valhalla_build_admins -c /data/valhalla_config.json /data/raw.osm.pbf 2>&1 | tail -20
             echo "=== tiles ==="
-            /usr/bin/time -v valhalla_build_tiles -s -c /data/valhalla_config.json /data/raw.osm.pbf 2>&1 | tail -25
+            /usr/bin/time -v valhalla_build_tiles -c /data/valhalla_config.json /data/raw.osm.pbf 2>&1 | tail -25
             echo "=== extract ==="
             valhalla_build_extract -c /data/valhalla_config.json
             echo "=== pipeline done ==="
