@@ -45,6 +45,7 @@ jobs:
           # country count for the READY gate
           COUNT=$(echo "$REGIONS" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['region']))")
           echo "count=$COUNT" >> $GITHUB_OUTPUT
+      - uses: actions/checkout@v4
       - id: tag
         run: |
           # draft release: assets upload during the matrix; the final job flips

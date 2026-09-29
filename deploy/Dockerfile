@@ -2,6 +2,7 @@
 # Wraps the official image with a startup step that materialises the per-
 # country tile tars from the latest READY GitHub Release onto the attached
 # disk, then serves the graph in tile_dir mode.
+FROM valhalla/valhalla:run-latest
 
 COPY deploy/entrypoint.sh /usr/local/bin/anipals-entrypoint.sh
 RUN chmod +x /usr/local/bin/anipals-entrypoint.sh
