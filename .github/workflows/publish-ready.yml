@@ -61,8 +61,10 @@ jobs:
           echo "country slugs: $SLUGS (min $MIN)"
           [ "$SLUGS" -ge "$MIN" ] || { echo "incomplete supply — refusing to publish"; exit 2; }
           echo "ok" > READY
-          gh release upload "$TAG" READY --clobber --repo "$GITHUB_REPOSITORY"
-          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          if ! OUT=$(gh release upload "$TAG" READY --clobber --repo "$GITHUB_REPOSITORY" 2>&1); then
+            echo "upload READY failed: $OUT" >> /tmp/diag.md; exit 3; fi
+          if ! OUT=$(gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY" 2>&1); then
+            echo "publish (edit --draft=false) failed: $OUT" >> /tmp/diag.md; exit 4; fi
           echo "published: $TAG"
       - name: Commit diagnostics on failure
         if: failure()
