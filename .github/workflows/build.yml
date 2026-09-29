@@ -4,7 +4,14 @@ name: valhalla-tiles-build
 # and public Release assets the Render service pulls without credentials.
 #
 # Architecture (v2): there is NO global merge — the merged world graph is
-# ~31 GB of tiles, far beyond a 14 GB runner disk. Instead every country
+# ~31 GB of tiles, far beyond a 14 GB runner disk. NOTE: a full-run rebuild is
+# triggered by pushing any change to this file (push trigger below); dispatch
+# with a `countries` subset only ever publishes a PARTIAL release (each run
+# makes its own draft release), so subset runs are for diagnosis, not delivery.
+# Round 5 (2026-09-29): round 4 unrecoverable — europe/romania failed in the
+# pbf download step (Geofabrik transient), which skips `final` (needs: build)
+# so no READY release can ever publish from that run. This push restarts full.
+# Instead every country
 # matrix job tars its tiles, splits into <=1.9 GB parts (Release asset limit)
 # and uploads them straight to a per-run draft Release. A final job verifies
 # the expected country count and uploads a READY asset; the Render entrypoint
