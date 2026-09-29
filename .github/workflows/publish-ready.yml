@@ -59,6 +59,8 @@ jobs:
           TAG: ${{ steps.diag.outputs.tag }}
         run: |
           set -e -o pipefail
+          exec 2> >(tee /tmp/trace.log >&2)
+          set -x
           # Count from the already-fetched releases list: gh api releases/tags
           # NEVER returns drafts (the original `final` job's failure), so every
           # draft lookup must come from this list instead.
@@ -80,7 +82,8 @@ jobs:
           set -e
           mkdir -p calibration
           { echo "# publish-ready diagnostics ($(date -u '+%Y-%m-%d %H:%M:%SZ'))";
-            cat /tmp/diag.md 2>/dev/null || echo '(diagnostics unavailable — failure before resolution)'; } > calibration/publish-ready-diagnostics.md
+            cat /tmp/diag.md 2>/dev/null || echo '(diagnostics unavailable — failure before resolution)';
+            echo; echo '## trace'; echo '```'; tail -60 /tmp/trace.log 2>/dev/null || echo '(no trace)'; echo '```'; } > calibration/publish-ready-diagnostics.md
           git config user.name "anipals-tiles-ci"
           git config user.email "actions@anipals.dev"
           git add calibration/publish-ready-diagnostics.md
