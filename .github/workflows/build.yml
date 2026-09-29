@@ -130,14 +130,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: [setup, build]
     steps:
-      - name: Verify country count, publish the release
+      - name: Publish the release (READY gate)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # every build job uploads only after its own success, so reaching
+          # `final` means all country parts are already on the draft release.
+          # gh release upload/edit resolve drafts correctly (the plain
+          # releases/tags API endpoint does not return drafts at all).
           TAG="${{ needs.setup.outputs.tag }}"
-          EXPECTED=${{ needs.setup.outputs.count }}
-          GOT=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '[.assets | length]')
-          echo "expected country parts >= $EXPECTED, assets: $GOT"
           echo "ok" > READY
           gh release upload "$TAG" READY --clobber --repo "$GITHUB_REPOSITORY"
           gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
