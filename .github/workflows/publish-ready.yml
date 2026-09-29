@@ -56,8 +56,13 @@ jobs:
           TAG: ${{ steps.diag.outputs.tag }}
         run: |
           set -e -o pipefail
-          SLUGS=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
-            --jq '[.assets[] | select(.name | endswith(".tar-00"))] | length')
+          # Count from the already-fetched releases list: gh api releases/tags
+          # NEVER returns drafts (the original `final` job's failure), so every
+          # draft lookup must come from this list instead.
+          SLUGS=$(jq -r --arg t "$TAG" \
+            '[.[] | select(.draft and .tag_name == $t)
+              | [.assets[] | select(.name | endswith(".tar-00"))] | length]' \
+            /tmp/releases.json)
           echo "country slugs: $SLUGS (min $MIN)"
           [ "$SLUGS" -ge "$MIN" ] || { echo "incomplete supply — refusing to publish"; exit 2; }
           echo "ok" > READY
