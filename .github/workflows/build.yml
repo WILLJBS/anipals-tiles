@@ -1,12 +1,15 @@
 name: valhalla-tiles-build
 # AniPals pedestrian navigation tiles (ADR-PLAY-11 in the private anipals-app
 # repo). OSM-derived data, ODbL — public repo on purpose: free Actions minutes
-# and a public Release asset that the Render service can pull without
-# credentials.
+# and public Release assets the Render service pulls without credentials.
 #
-# Continent extracts are built per-country in a matrix (each country pbf fits
-# the runner disk and RAM; whole-continent pbf/streams do not), then the per-
-# country tile dirs are merged and packed into one valhalla.tar Release.
+# Architecture (v2): there is NO global merge — the merged world graph is
+# ~31 GB of tiles, far beyond a 14 GB runner disk. Instead every country
+# matrix job tars its tiles, splits into <=1.9 GB parts (Release asset limit)
+# and uploads them straight to a per-run draft Release. A final job verifies
+# the expected country count and uploads a READY asset; the Render entrypoint
+# only consumes releases that carry READY. The service runs in tile_dir mode
+# (loose .gph files), so no valhalla_build_extract is ever needed.
 on:
   workflow_dispatch:
     inputs:
@@ -19,13 +22,15 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: valhalla-tiles-v2
+  group: valhalla-tiles-v3
   cancel-in-progress: true
 jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
+      count: ${{ steps.set.outputs.count }}
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - id: set
         run: |
@@ -34,10 +39,21 @@ jobs:
             # python: a multi-line heredoc breaks the surrounding YAML block scalar)
             REGIONS=$(echo "${{ github.event.inputs.countries }}" | tr ' ' '\n' | python3 -c "import json,sys; rs=[l.strip() for l in sys.stdin if l.strip()]; print(json.dumps({'region':[{'region':r,'slug':r.replace('/','-')} for r in rs]}))")
           else
-          REGIONS='{"region":[{"region":"europe/france","slug":"europe-france"},{"region":"europe/germany","slug":"europe-germany"},{"region":"europe/united-kingdom","slug":"europe-united-kingdom"},{"region":"europe/spain","slug":"europe-spain"},{"region":"europe/italy","slug":"europe-italy"},{"region":"europe/netherlands","slug":"europe-netherlands"},{"region":"europe/belgium","slug":"europe-belgium"},{"region":"europe/austria","slug":"europe-austria"},{"region":"europe/switzerland","slug":"europe-switzerland"},{"region":"europe/portugal","slug":"europe-portugal"},{"region":"europe/poland","slug":"europe-poland"},{"region":"europe/czech-republic","slug":"europe-czech-republic"},{"region":"europe/hungary","slug":"europe-hungary"},{"region":"europe/romania","slug":"europe-romania"},{"region":"europe/greece","slug":"europe-greece"},{"region":"europe/sweden","slug":"europe-sweden"},{"region":"europe/norway","slug":"europe-norway"},{"region":"europe/denmark","slug":"europe-denmark"},{"region":"europe/finland","slug":"europe-finland"},{"region":"europe/ireland-and-northern-ireland","slug":"europe-ireland-and-northern-ireland"},{"region":"russia","slug":"russia"},{"region":"europe/ukraine","slug":"europe-ukraine"},{"region":"europe/turkey","slug":"europe-turkey"},{"region":"asia/china","slug":"asia-china"},{"region":"asia/japan","slug":"asia-japan"},{"region":"asia/india","slug":"asia-india"},{"region":"asia/thailand","slug":"asia-thailand"},{"region":"asia/vietnam","slug":"asia-vietnam"},{"region":"asia/indonesia","slug":"asia-indonesia"},{"region":"asia/israel-and-palestine","slug":"asia-israel-and-palestine"},{"region":"asia/gcc-states","slug":"asia-gcc-states"},{"region":"asia/philippines","slug":"asia-philippines"},{"region":"asia/malaysia-singapore-brunei","slug":"asia-malaysia-singapore-brunei"},{"region":"asia/pakistan","slug":"asia-pakistan"},{"region":"north-america/us","slug":"north-america-us"},{"region":"north-america/canada","slug":"north-america-canada"},{"region":"north-america/mexico","slug":"north-america-mexico"},{"region":"south-america/brazil","slug":"south-america-brazil"},{"region":"south-america/argentina","slug":"south-america-argentina"},{"region":"south-america/peru","slug":"south-america-peru"},{"region":"south-america/colombia","slug":"south-america-colombia"},{"region":"south-america/ecuador","slug":"south-america-ecuador"},{"region":"central-america/panama","slug":"central-america-panama"},{"region":"central-america/costa-rica","slug":"central-america-costa-rica"},{"region":"australia-oceania/australia","slug":"australia-oceania-australia"},{"region":"australia-oceania/new-zealand","slug":"australia-oceania-new-zealand"},{"region":"africa/egypt","slug":"africa-egypt"},{"region":"africa/morocco","slug":"africa-morocco"},{"region":"africa/algeria","slug":"africa-algeria"},{"region":"africa/tunisia","slug":"africa-tunisia"},{"region":"africa/south-africa","slug":"africa-south-africa"},{"region":"africa/nigeria","slug":"africa-nigeria"},{"region":"africa/ghana","slug":"africa-ghana"},{"region":"africa/kenya","slug":"africa-kenya"},{"region":"africa/tanzania","slug":"africa-tanzania"},{"region":"africa/rwanda","slug":"africa-rwanda"},{"region":"africa/ethiopia","slug":"africa-ethiopia"}]}'
-
+            REGIONS='{"region":[{"region":"europe/france","slug":"europe-france"},{"region":"europe/germany","slug":"europe-germany"},{"region":"europe/united-kingdom","slug":"europe-united-kingdom"},{"region":"europe/spain","slug":"europe-spain"},{"region":"europe/italy","slug":"europe-italy"},{"region":"europe/netherlands","slug":"europe-netherlands"},{"region":"europe/belgium","slug":"europe-belgium"},{"region":"europe/austria","slug":"europe-austria"},{"region":"europe/switzerland","slug":"europe-switzerland"},{"region":"europe/portugal","slug":"europe-portugal"},{"region":"europe/poland","slug":"europe-poland"},{"region":"europe/czech-republic","slug":"europe-czech-republic"},{"region":"europe/hungary","slug":"europe-hungary"},{"region":"europe/romania","slug":"europe-romania"},{"region":"europe/greece","slug":"europe-greece"},{"region":"europe/sweden","slug":"europe-sweden"},{"region":"europe/norway","slug":"europe-norway"},{"region":"europe/denmark","slug":"europe-denmark"},{"region":"europe/finland","slug":"europe-finland"},{"region":"europe/ireland-and-northern-ireland","slug":"europe-ireland-and-northern-ireland"},{"region":"russia","slug":"russia"},{"region":"europe/ukraine","slug":"europe-ukraine"},{"region":"europe/turkey","slug":"europe-turkey"},{"region":"asia/china","slug":"asia-china"},{"region":"asia/japan","slug":"asia-japan"},{"region":"asia/india","slug":"asia-india"},{"region":"asia/thailand","slug":"asia-thailand"},{"region":"asia/vietnam","slug":"asia-vietnam"},{"region":"asia/indonesia","slug":"asia-indonesia"},{"region":"asia/israel-and-palestine","slug":"asia-israel-and-palestine"},{"region":"asia/gcc-states","slug":"asia-gcc-states"},{"region":"asia/philippines","slug":"asia-philippines"},{"region":"asia/malaysia-singapore-brunei","slug":"asia-malaysia-singapore-brunei"},{"region":"asia/pakistan","slug":"asia-pakistan"},{"region":"north-america/us","slug":"north-america-us"},{"region":"north-america/canada","slug":"north-america-canada"},{"region":"north-america/mexico","slug":"north-america-mexico"},{"region":"south-america/brazil","slug":"south-america-brazil"},{"region":"south-america/argentina","slug":"south-america-argentina"},{"region":"south-america/peru","slug":"south-america-peru"},{"region":"south-america/colombia","slug":"south-america-colombia"},{"region":"south-america/ecuador","slug":"south-america-ecuador"},{"region":"central-america/panama","slug":"central-america-panama"},{"region":"central-america/costa-rica","slug":"central-america-costa-rica"},{"region":"australia-oceania/australia","slug":"australia-oceania-australia"},{"region":"australia-oceania/new-zealand","slug":"australia-oceania-new-zealand"},{"region":"africa/egypt","slug":"africa-egypt"},{"region":"africa/morocco","slug":"africa-morocco"},{"region":"africa/algeria","slug":"africa-algeria"},{"region":"africa/tunisia","slug":"africa-tunisia"},{"region":"africa/south-africa","slug":"africa-south-africa"},{"region":"africa/nigeria","slug":"africa-nigeria"},{"region":"africa/ghana","slug":"africa-ghana"},{"region":"africa/kenya","slug":"africa-kenya"},{"region":"africa/tanzania","slug":"africa-tanzania"},{"region":"africa/rwanda","slug":"africa-rwanda"},{"region":"africa/ethiopia","slug":"africa-ethiopia"}]}'
           fi
           echo "matrix=$REGIONS" >> $GITHUB_OUTPUT
+          # country count for the READY gate
+          COUNT=$(echo "$REGIONS" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['region']))")
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+      - id: tag
+        run: |
+          # draft release: assets upload during the matrix; the final job flips
+          # it to published by uploading READY once the expected count is there
+          TAG="tiles-$(date -u +%Y%m%d)-${{ github.run_number }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          gh release create "$TAG" --draft --title "$TAG" --notes "Valhalla pedestrian tiles (per-country tars, tile_dir mode). OSM-derived (ODbL)."
+        env:
+          GH_TOKEN: ${{ github.token }}
   build:
     runs-on: ubuntu-latest
     needs: setup
@@ -64,9 +80,11 @@ jobs:
           ls -lh filtered.osm.pbf | tee -a calib.txt
       - name: Build Valhalla tiles
         run: |
-          # valhalla_build_tiles on big countries (FR/DE ~2GB filtered) spikes
-          # past the 7GB runner RAM — a swap file keeps it from hanging forever
-          sudo fallocate -l 10G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          # runners are reused VMs: a previous job's swapfile may still be
+          # swapped on (fallocate then fails with "Text file busy") — reset first
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 10G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile || echo "swap setup failed (continuing)"
           free -h | tee -a calib.txt
           mkdir -p tiles
           docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest valhalla_build_config \
@@ -84,98 +102,35 @@ jobs:
           ' 2>&1 | tee build.log
           grep -E "=== |Maximum resident|Elapsed \(wall|CRITICAL" build.log | tee -a calib.txt
           du -sh tiles | tee -a calib.txt
+          # free disk BEFORE tar: pbf+filtered can be 12 GB (US), and tar needs
+          # a tiles-sized copy — both at once exceeded the 14 GB runner disk
+          sudo rm -rf raw.osm.pbf filtered.osm.pbf build.log
           tar -cf "tiles-${{ matrix.region.slug }}.tar" tiles
-          # big countries (US: tiles 55 min, ~15 GB peak RSS) exhaust the 14 GB
-          # runner disk — drop intermediates the moment the tar exists
-          sudo rm -rf tiles raw.osm.pbf filtered.osm.pbf build.log
+          sudo rm -rf tiles
+          # GitHub release assets cap at 2 GB — split for the big countries
+          split -d -b 1900M "tiles-${{ matrix.region.slug }}.tar" "tiles-${{ matrix.region.slug }}.tar-"
+          rm -f "tiles-${{ matrix.region.slug }}.tar"
+          ls -lh tiles-*.tar-* | tee -a calib.txt
           df -h / | tail -1 | tee -a calib.txt
-      - name: Upload country tiles
-        uses: actions/upload-artifact@v4
-        with:
-          name: tiles-${{ matrix.region.slug }}
-          path: tiles-*.tar
-          retention-days: 3
-  release:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download all country tiles
-        uses: actions/download-artifact@v4
-        with:
-          path: parts
-          merge-multiple: false
-      - name: Merge, extract, smoke, publish
+      - name: Upload parts to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
-          mkdir -p tiles
-          # every country tar carries a tiles/ prefix; extracting them all into
-          # the same tree merges the graphs (tile files never collide)
-          for f in parts/*/tiles-*.tar; do tar -xf "$f" -C .; done
-          du -sh tiles | tee -a calib.txt
-          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest valhalla_build_config \
-            --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 2 > valhalla_config.json
-          python3 -c "import json;c=json.load(open('valhalla_config.json'));c['mjolnir']['tile_extract']='/data/valhalla.tar';json.dump(c,open('valhalla_config.json','w'))"
-          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest \
-            valhalla_build_extract -c /data/valhalla_config.json
-          du -sh valhalla.tar | tee -a calib.txt
-          # Three-city smoke: Paris / Beijing / New York — exercises the merged global graph
-          docker run -d --name valhalla-smoke -p 8002:8002 -v "$PWD:/data" \
-            valhalla/valhalla:run-latest valhalla_service /data/valhalla_config.json 1
-          for i in $(seq 1 60); do
-            sleep 2
-            if curl -sf "http://127.0.0.1:8002/status" > /dev/null; then echo "service up after $((i*2))s" | tee -a calib.txt; break; fi
-          done
-          if ! curl -sf "http://127.0.0.1:8002/status" > /dev/null; then
-            echo "service never came up; last logs:" | tee -a calib.txt
-            docker logs valhalla-smoke 2>&1 | tail -12 | tee -a calib.txt
-          fi
-          for city in "paris 48.8606 2.3376 48.8584 2.2945" "beijing 39.9075 116.3972 39.9254 116.3968" "new-york 40.7484 -73.9857 40.7580 -73.9855"; do
-            set -- $city
-            START=$(date +%s%N)
-            if curl -sf "http://127.0.0.1:8002/route" -H 'content-type: application/json' \
-              -d "{\"locations\":[{\"lat\":$2,\"lon\":$3},{\"lat\":$4,\"lon\":$5}],\"costing\":\"pedestrian\",\"directions_type\":\"none\"}" \
-              -o smoke_$1.json; then
-              END=$(date +%s%N)
-              echo "$1 route OK query_ms=$(( (END-START)/1000000 )) $(python3 -c "import json;t=json.load(open('smoke_$1.json'))['trip'];print('length_km',t['summary']['length'])")" | tee -a calib.txt
-            else
-              echo "$1 route FAILED" | tee -a calib.txt
-            fi
-          done
-          docker rm -f valhalla-smoke
-          TAG="tiles-global-$(date -u +%Y%m%d)-${{ github.run_number }}"
-          gh release create "$TAG" valhalla.tar --title "$TAG" --notes "Valhalla pedestrian tiles, global (merged country builds). OSM-derived (ODbL)."
-          echo "release_tag: $TAG" | tee -a calib.txt
-          echo "asset_url: https://github.com/${{ github.repository }}/releases/download/${TAG}/valhalla.tar" | tee -a calib.txt
-          # persist the exact runtime config next to the deploy image (paths are
-          # already container paths: /data/valhalla.tar)
-          mkdir -p runtime
-          cp valhalla_config.json runtime/valhalla_config.json
-          git add runtime/valhalla_config.json
-          git commit -m "runtime config for ${TAG}" || echo "config unchanged"
-          git push
-      - name: Upload to R2 (optional)
+          gh release upload "${{ needs.setup.outputs.tag }}" tiles-${{ matrix.region.slug }}.tar-* --clobber --repo "$GITHUB_REPOSITORY"
+          echo "uploaded: ${{ matrix.region.slug }}" | tee -a calib.txt
+  final:
+    runs-on: ubuntu-latest
+    needs: [setup, build]
+    steps:
+      - name: Verify country count, publish the release
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$AWS_ACCESS_KEY_ID" ]; then echo "r2: secrets not set, skipped" | tee -a calib.txt; exit 0; fi
-          aws s3 cp valhalla.tar "s3://anipals-valhalla-tiles/global/$(date -u +%Y%m%d)-${{ github.run_number }}/valhalla.tar" --endpoint-url "$R2_ENDPOINT"
-          echo "r2: uploaded" | tee -a calib.txt
-      - name: Commit calibration report
-        run: |
-          {
-            echo "# navigation tiles calibration — global (merged country builds)"
-            echo "- run: ${{ github.run_number }} @ $(date -u '+%FT%TZ')"
-            echo '```'
-            cat calib.txt
-            echo '```'
-          } > "calibration/global.md"
-          git config user.name "anipals-ci"
-          git config user.email "ci@anipals.app"
-          git add calibration
-          git commit -m "calibration: global (run ${{ github.run_number }})" || echo "no changes"
-          git push
+          TAG="${{ needs.setup.outputs.tag }}"
+          EXPECTED=${{ needs.setup.outputs.count }}
+          GOT=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '[.assets | length]')
+          echo "expected country parts >= $EXPECTED, assets: $GOT"
+          echo "ok" > READY
+          gh release upload "$TAG" READY --clobber --repo "$GITHUB_REPOSITORY"
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          echo "release published: $TAG"

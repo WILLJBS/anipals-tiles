@@ -8,10 +8,14 @@ This repo is public on purpose: the tiles are **OpenStreetMap-derived data
 free Actions minutes and a public Release asset the Render service can pull
 without credentials.
 
-- Workflow: `.github/workflows/build.yml` — dispatch with a Geofabrik region id
-  (`europe/iceland`, `asia/china`, ...) or push a workflow change.
-- Artifacts: GitHub Releases (`tiles-<region>-<date>-<run>/valhalla.tar`),
-  optionally mirrored to R2 (`anipals-valhalla-tiles` bucket).
-- Build cost numbers land in `calibration/<region>.md` after every run.
+- Workflow: `.github/workflows/build.yml` — per-country matrix (6 parallel),
+  each job tars its tiles, splits into <=1.9 GB parts and uploads them to a
+  draft Release; a final job publishes the release with a READY asset once
+  every country has uploaded (subset reruns: dispatch with a `countries`
+  list, e.g. `north-america/us asia/malaysia-singapore-brunei`).
+- There is no global merge: the merged world graph is ~31 GB of tiles — the
+  Render service (deploy/) downloads the per-country tars from the latest
+  READY release into a tile directory and serves it in tile_dir mode.
+- Build cost numbers land in `calibration/` after every run.
 
 Tiles built from © OpenStreetMap contributors, data licensed ODbL.
