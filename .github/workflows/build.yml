@@ -78,6 +78,8 @@ jobs:
           file raw.osm.pbf | grep -qiE "OSM PBF|Protocolbuffer" || { echo "download is not a pbf (rate-limited?)"; exit 1; }
           ls -lh raw.osm.pbf | tee -a calib.txt
           osmium tags-filter raw.osm.pbf -o filtered.osm.pbf w/highway w/route=ferry r/boundary=administrative
+          # free ~10 GB before the tile build: raw is the biggest single item
+          sudo rm -f raw.osm.pbf
           ls -lh filtered.osm.pbf | tee -a calib.txt
       - name: Build Valhalla tiles
         run: |
@@ -106,11 +108,9 @@ jobs:
           # free disk BEFORE tar: pbf+filtered can be 12 GB (US), and tar needs
           # a tiles-sized copy — both at once exceeded the 14 GB runner disk
           sudo rm -rf raw.osm.pbf filtered.osm.pbf build.log
-          tar -cf "tiles-${{ matrix.region.slug }}.tar" tiles
+          # stream straight to <=1.9 GB parts (no full-size tar on disk)
+          tar -cf - tiles | split -d -b 1900M - "tiles-${{ matrix.region.slug }}.tar-"
           sudo rm -rf tiles
-          # GitHub release assets cap at 2 GB — split for the big countries
-          split -d -b 1900M "tiles-${{ matrix.region.slug }}.tar" "tiles-${{ matrix.region.slug }}.tar-"
-          rm -f "tiles-${{ matrix.region.slug }}.tar"
           ls -lh tiles-*.tar-* | tee -a calib.txt
           df -h / | tail -1 | tee -a calib.txt
       - name: Upload parts to the draft release
