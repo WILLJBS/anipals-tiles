@@ -37,14 +37,17 @@ jobs:
         run: |
           set -e -o pipefail
           gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/releases.json
-          # newest draft first (API order); TSV: tag | created | countries | READY
+          # TSV: tag | created | countries | READY — newest first (API order)
           jq -r '.[] | select(.draft) | [.tag_name, .created_at,
             ([.assets[] | select(.name | endswith(".tar-00"))] | length),
             ([.assets[].name] | index("READY") != null)] | @tsv' \
             /tmp/releases.json | tee /tmp/drafts.tsv | sed 's/^/draft: /'
-          TAG=$(head -1 /tmp/drafts.tsv | cut -f1)
+          # Target = newest draft that already carries the full country set —
+          # an in-flight build's fresh empty draft must never win the pick.
+          MIN_D="${{ github.event.inputs.min_countries || '61' }}"
+          TAG=$(awk -F'\t' -v m="$MIN_D" '$3 >= m && $4 == "false" {print $1; exit}' /tmp/drafts.tsv)
           if [ -n "$WANT" ]; then TAG="$WANT"; fi
-          if [ -z "$TAG" ]; then echo "no draft release found"; exit 1; fi
+          if [ -z "$TAG" ]; then echo "no complete draft found"; exit 1; fi
           echo "target=$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           { echo "# publish-ready diagnostics ($(date -u '+%Y-%m-%d %H:%M:%SZ'))";
