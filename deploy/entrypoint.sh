@@ -107,9 +107,7 @@ for a in sorted(r["assets"], key=lambda a: a["name"]):
     sleep $((RANDOM % PAUSE))
     set -e
     slug="{}"
-    if [ -f "/data/tiles/$slug.done" ]; then
-      echo "[anipals-entrypoint] $slug already materialised"; exit 0
-    fi
+    if [ -f "/data/tiles/$slug.done" ]; then exit 0; fi
     echo "[anipals-entrypoint] $slug"
     # Per-part files + curl -C - resume: a killed big download keeps its bytes
     # and the next boot continues the same part instead of restarting from
