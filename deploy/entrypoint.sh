@@ -119,7 +119,9 @@ for a in sorted(r["assets"], key=lambda a: a["name"]):
     while read -r url; do
       f="/data/tiles/$slug.part-$n"
       curl -sfL -C - --retry 5 --retry-delay 10 "$url" -o "$f" || {
-        echo "[anipals-entrypoint] $slug part $n failed — partial kept for resume"; exit 1; }
+        code=$?
+        echo "[anipals-entrypoint] $slug part $n FAILED curl_exit=$code size=$(wc -c < "$f" 2>/dev/null || echo 0) head=[$(head -c 120 "$f" 2>/dev/null | tr -d '\0' | tr '\n' ' ')]"
+        exit 1; }
       n=$((n+1))
     done < "/tmp/$slug.urls"
     # A truncated/garbage tar (CDN rate-limit page, ENOSPC) must fail the leg
