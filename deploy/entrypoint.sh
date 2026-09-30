@@ -111,16 +111,23 @@ for a in sorted(r["assets"], key=lambda a: a["name"]):
       echo "[anipals-entrypoint] $slug already materialised"; exit 0
     fi
     echo "[anipals-entrypoint] $slug"
-    : > "/data/tiles/$slug.tar"
-    grep "^$slug	" /tmp/part-urls.txt | cut -f2 | while read -r url; do
-      curl -sfL --retry 5 --retry-delay 10 "$url" >> "/data/tiles/$slug.tar"
-    done
+    # Per-part files + curl -C - resume: a killed big download keeps its bytes
+    # and the next boot continues the same part instead of restarting from
+    # zero (the NA legs died mid-transfer every boot under truncate-and-retry).
+    grep "^$slug	" /tmp/part-urls.txt | cut -f2 > "/tmp/$slug.urls"
+    n=0
+    while read -r url; do
+      f="/data/tiles/$slug.part-$n"
+      curl -sfL -C - --retry 5 --retry-delay 10 "$url" -o "$f" || {
+        echo "[anipals-entrypoint] $slug part $n failed — partial kept for resume"; exit 1; }
+      n=$((n+1))
+    done < "/tmp/$slug.urls"
     # A truncated/garbage tar (CDN rate-limit page, ENOSPC) must fail the leg
-    # loudly: release-CDN bursts served instant error pages in the 06:00 pull
-    # and unconditional .done markers froze the damage in place.
+    # loudly: unconditional .done markers froze damage in place (06:00 pull).
+    cat $(ls /data/tiles/$slug.part-* | sort) > "/data/tiles/$slug.tar"
     tar -tf "/data/tiles/$slug.tar" > /dev/null
     tar -xf "/data/tiles/$slug.tar" -C /data/tiles
-    rm -f "/data/tiles/$slug.tar"
+    rm -f /data/tiles/$slug.part-* "/data/tiles/$slug.tar"
     touch "/data/tiles/$slug.done"
   ' || echo "[anipals-entrypoint] some legs failed — missing legs resume on next boot"
   COUNT=$(find "$TILES_DIR" -name '*.gph' | wc -l)
