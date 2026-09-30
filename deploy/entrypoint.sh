@@ -21,6 +21,19 @@ MARKER=/data/tiles/.complete
 
 mkdir -p "$TILES_DIR"
 
+# One-shot clean reset (set RESET_TILES=1 in the service env for exactly one
+# deploy): the first pull round predated the per-country .done markers, so
+# orphaned partial tars + unmarked extractions filled the disk and a resumable
+# retry cannot distinguish them. Wipe once, then the marked single pass fits
+# (31 GB tiles + <=8 GB transient on the 50 GB disk).
+if [ "${RESET_TILES:-0}" = "1" ]; then
+  echo "[anipals-entrypoint] RESET_TILES=1 — wiping $TILES_DIR for a clean marked pass"
+  rm -rf "$TILES_DIR"
+  mkdir -p "$TILES_DIR"
+fi
+# stray transient tars from any killed run are always safe to drop
+rm -f "$TILES_DIR"/*.tar
+
 # placeholder server: binds 8002 immediately so the deploy never hits the
 # port-scan timeout; replaced by valhalla_service once tiles are ready
 PLACEHOLDER=/tmp/placeholder.py
