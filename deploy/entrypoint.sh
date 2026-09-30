@@ -97,7 +97,14 @@ for a in sorted(r["assets"], key=lambda a: a["name"]):
   # append so no full-size tar ever sits on disk next to its parts. A country
   # whose tiles are already on disk (previous boot) is skipped — resumable
   # across Render's deploy window.
+  # Stagger legs (PAUSE seconds, default 20): release-CDN abuse limits trip
+  # after ~15-20 back-to-back large downloads, killing every remaining leg of
+  # the boot. The pause trades minutes for per-boot yield. Exported so the
+  # single-quoted child sees it.
+  PAUSE=${VALHALLA_LEG_PAUSE:-20}
+  export PAUSE
   cat /tmp/countries.txt | xargs -P 2 -I{} sh -c '
+    sleep $((RANDOM % PAUSE))
     set -e
     slug="{}"
     if [ -f "/data/tiles/$slug.done" ]; then
