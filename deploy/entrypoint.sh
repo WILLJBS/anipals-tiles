@@ -97,24 +97,35 @@ for a in sorted(r["assets"], key=lambda a: a["name"]):
   # append so no full-size tar ever sits on disk next to its parts. A country
   # whose tiles are already on disk (previous boot) is skipped — resumable
   # across Render's deploy window.
-  cat /tmp/countries.txt | xargs -P 4 -I{} sh -c '
+  cat /tmp/countries.txt | xargs -P 2 -I{} sh -c '
+    set -e
     slug="{}"
-    if ls /data/tiles/"$slug"/*.gph >/dev/null 2>&1 || ls /data/tiles/*.gph >/dev/null 2>&1 && [ -f "/data/tiles/$slug.done" ]; then
+    if [ -f "/data/tiles/$slug.done" ]; then
       echo "[anipals-entrypoint] $slug already materialised"; exit 0
     fi
     echo "[anipals-entrypoint] $slug"
     : > "/data/tiles/$slug.tar"
     grep "^$slug	" /tmp/part-urls.txt | cut -f2 | while read -r url; do
-      curl -sfL --retry 5 "$url" >> "/data/tiles/$slug.tar"
+      curl -sfL --retry 5 --retry-delay 10 "$url" >> "/data/tiles/$slug.tar"
     done
-    tar -xf "/data/tiles/$slug.tar" -C /data/tiles --strip-components=1
+    # A truncated/garbage tar (CDN rate-limit page, ENOSPC) must fail the leg
+    # loudly: release-CDN bursts served instant error pages in the 06:00 pull
+    # and unconditional .done markers froze the damage in place.
+    tar -tf "/data/tiles/$slug.tar" > /dev/null
+    tar -xf "/data/tiles/$slug.tar" -C /data/tiles
     rm -f "/data/tiles/$slug.tar"
     touch "/data/tiles/$slug.done"
-  '
+  ' || echo "[anipals-entrypoint] some legs failed — missing legs resume on next boot"
   COUNT=$(find "$TILES_DIR" -name '*.gph' | wc -l)
-  echo "[anipals-entrypoint] extracted $COUNT tile files"
+  DONE_N=$(find "$TILES_DIR" -maxdepth 1 -name '*.done' | wc -l)
+  EXPECT=$(wc -l < /tmp/countries.txt | tr -d ' ')
+  echo "[anipals-entrypoint] extracted $COUNT tile files; legs done $DONE_N/$EXPECT"
   [ "$COUNT" -gt 0 ] || { echo "[anipals-entrypoint] no tiles extracted"; exit 24; }
-  touch "$MARKER"
+  if [ "$DONE_N" -ge "$EXPECT" ]; then
+    touch "$MARKER"
+  else
+    echo "[anipals-entrypoint] partial coverage — serving what exists; missing legs resume on next boot"
+  fi
 fi
 
 # The per-country tars carry a tiles/ prefix; if an older entrypoint version
