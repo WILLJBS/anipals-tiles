@@ -30,18 +30,26 @@ r=json.load(sys.stdin)
 for a in sorted(r["assets"], key=lambda a: a["name"]):
     if a["name"].endswith(".tar-00"):
         print(a["name"][: -len(".tar-00")])' > /tmp/countries.txt
+  # Pre-resolve slug -> part URLs to a TSV file. The 61-country release JSON
+  # is ~85 assets; inlining $RELEASE_JSON into the xargs child shell blew the
+  # exec arg limit ("xargs: Argument list too long", 2026-09-30) — the child
+  # now reads only its own URLs from /tmp/part-urls.txt (a few hundred bytes).
+  echo "$RELEASE_JSON" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+for a in sorted(r["assets"], key=lambda a: a["name"]):
+    if a["name"].endswith(".tar-00"):
+        slug=a["name"][:-len(".tar-00")]
+        for b in r["assets"]:
+            if b["name"].startswith(slug+".tar-"):
+                print(slug+"\t"+b["browser_download_url"])' > /tmp/part-urls.txt
   # download+extract countries in parallel (4 workers); parts re-joined via
   # append so no full-size tar ever sits on disk next to its parts
   cat /tmp/countries.txt | xargs -P 4 -I{} sh -c '
     slug="{}"
     echo "[anipals-entrypoint] $slug"
     : > "/data/tiles/$slug.tar"
-    for url in $(echo "'"$RELEASE_JSON"'" | python3 -c "
-import json,sys
-r=json.load(sys.stdin)
-for a in sorted(r[\"assets\"], key=lambda a: a[\"name\"]):
-    if a[\"name\"].startswith(\"$slug.tar-\"):
-        print(a[\"browser_download_url\"])"); do
+    grep "^$slug	" /tmp/part-urls.txt | cut -f2 | while read -r url; do
       curl -sfL --retry 5 "$url" >> "/data/tiles/$slug.tar"
     done
     tar -xf "/data/tiles/$slug.tar" -C /data/tiles
