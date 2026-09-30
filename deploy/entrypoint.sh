@@ -108,12 +108,22 @@ fi
 # unpacked them without --strip-components the graph sits one level too deep
 # (valhalla reads /data/tiles/0/... and finds nothing). Flatten in place —
 # cheaper than re-downloading 31 GB.
-if [ -d "$TILES_DIR/tiles" ] && [ ! -d "$TILES_DIR/0" ]; then
+if [ -d "$TILES_DIR/tiles" ]; then
   echo "[anipals-entrypoint] flattening nested tiles/ directory"
   find "$TILES_DIR/tiles" -type d -exec chmod 755 {} + 2>/dev/null || true
   find "$TILES_DIR/tiles" -type f -exec chmod 644 {} + 2>/dev/null || true
-  cp -R "$TILES_DIR/tiles/" "$TILES_DIR/" 2>/dev/null || true
-  find "$TILES_DIR" -maxdepth 1 -name '*.gph' -o -maxdepth 2 -name '[0-9]*' -type d | grep -q . || true
+  # same-filesystem rename: instant, no double space (cp would blow the disk)
+  for d in "$TILES_DIR/tiles"/*; do
+    base=$(basename "$d")
+    if [ -e "$TILES_DIR/$base" ]; then
+      cp -R "$d/." "$TILES_DIR/$base/" || true
+      rm -rf "$d"
+    else
+      mv "$d" "$TILES_DIR/$base"
+    fi
+  done
+  rmdir "$TILES_DIR/tiles" 2>/dev/null || true
+  echo "[anipals-entrypoint] flattened; gph count: $(find "$TILES_DIR" -name '*.gph' | wc -l)"
 fi
 
 # runtime config: tile_dir mode (tile_extract stays empty so valhalla reads
