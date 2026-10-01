@@ -97,39 +97,44 @@ for a in sorted(r["assets"], key=lambda a: a["name"]):
   # append so no full-size tar ever sits on disk next to its parts. A country
   # whose tiles are already on disk (previous boot) is skipped — resumable
   # across Render's deploy window.
-  # Stagger legs (PAUSE seconds, default 20): release-CDN abuse limits trip
-  # after ~15-20 back-to-back large downloads, killing every remaining leg of
-  # the boot. The pause trades minutes for per-boot yield. Exported so the
-  # single-quoted child sees it.
+  # The leg body lives in /tmp/leg-download.sh so the PERSISTENT downloader
+  # below reuses byte-identical logic after the service is already serving.
   PAUSE=${VALHALLA_LEG_PAUSE:-20}
   export PAUSE
-  cat /tmp/countries.txt | xargs -P 2 -I{} sh -c '
-    sleep $((RANDOM % PAUSE))
-    set -e
-    slug="{}"
-    if [ -f "/data/tiles/$slug.done" ]; then exit 0; fi
-    echo "[anipals-entrypoint] $slug"
-    # Per-part files + curl -C - resume: a killed big download keeps its bytes
-    # and the next boot continues the same part instead of restarting from
-    # zero (the NA legs died mid-transfer every boot under truncate-and-retry).
-    grep "^$slug	" /tmp/part-urls.txt | cut -f2 > "/tmp/$slug.urls"
-    n=0
-    while read -r url; do
-      f="/data/tiles/$slug.part-$n"
-      curl -sfL -C - --retry 5 --retry-delay 10 "$url" -o "$f" || {
-        code=$?
-        echo "[anipals-entrypoint] $slug part $n FAILED curl_exit=$code size=$(wc -c < "$f" 2>/dev/null || echo 0) head=[$(head -c 120 "$f" 2>/dev/null | tr -d '\0' | tr '\n' ' ')]"
-        exit 1; }
-      n=$((n+1))
-    done < "/tmp/$slug.urls"
-    # A truncated/garbage tar (CDN rate-limit page, ENOSPC) must fail the leg
-    # loudly: unconditional .done markers froze damage in place (06:00 pull).
-    cat $(ls /data/tiles/$slug.part-* | sort) > "/data/tiles/$slug.tar"
-    tar -tf "/data/tiles/$slug.tar" > /dev/null
-    tar -xf "/data/tiles/$slug.tar" -C /data/tiles
-    rm -f /data/tiles/$slug.part-* "/data/tiles/$slug.tar"
-    touch "/data/tiles/$slug.done"
-  ' || echo "[anipals-entrypoint] some legs failed — missing legs resume on next boot"
+  cat > /tmp/leg-download.sh <<'LEGEOF'
+#!/bin/sh
+# One pass over every country missing its .done marker. Exit 0 when nothing
+# (or nothing more) is missing; a leg that fails is picked up on the next pass.
+slug="$1"
+[ -f "/data/tiles/$slug.done" ] && exit 0
+set -e
+# Stagger concurrent leg starts (release-CDN abuse limits trip after ~15-20
+# back-to-back large downloads); a bounded pause trades seconds for per-pass yield.
+sleep $((RANDOM % PAUSE))
+echo "[anipals-entrypoint] $slug"
+# Per-part files + curl -C - resume: a killed big download keeps its bytes
+# and the next pass continues the same part instead of restarting from zero
+# (the NA legs died mid-transfer every boot under truncate-and-retry).
+grep "^$slug	" /tmp/part-urls.txt | cut -f2 > "/tmp/$slug.urls"
+n=0
+while read -r url; do
+  f="/data/tiles/$slug.part-$n"
+  curl -sfL -C - --retry 5 --retry-delay 10 "$url" -o "$f" || {
+    code=$?
+    echo "[anipals-entrypoint] $slug part $n FAILED curl_exit=$code size=$(wc -c < "$f" 2>/dev/null || echo 0) head=[$(head -c 120 "$f" 2>/dev/null | tr -d '\0' | tr '\n' ' ')]"
+    exit 1; }
+  n=$((n+1))
+done < "/tmp/$slug.urls"
+# A truncated/garbage tar (CDN rate-limit page, ENOSPC) must fail the leg
+# loudly: unconditional .done markers froze damage in place (06:00 pull).
+cat $(ls /data/tiles/$slug.part-* | sort) > "/data/tiles/$slug.tar"
+tar -tf "/data/tiles/$slug.tar" > /dev/null
+tar -xf "/data/tiles/$slug.tar" -C /data/tiles
+rm -f /data/tiles/$slug.part-* "/data/tiles/$slug.tar"
+touch "/data/tiles/$slug.done"
+LEGEOF
+chmod +x /tmp/leg-download.sh
+  cat /tmp/countries.txt | xargs -P 4 -I{} /tmp/leg-download.sh {} || echo "[anipals-entrypoint] some legs failed — the persistent downloader keeps retrying below"
   COUNT=$(find "$TILES_DIR" -name '*.gph' | wc -l)
   DONE_N=$(find "$TILES_DIR" -maxdepth 1 -name '*.done' | wc -l)
   EXPECT=$(wc -l < /tmp/countries.txt | tr -d ' ')
@@ -138,7 +143,36 @@ for a in sorted(r["assets"], key=lambda a: a["name"]):
   if [ "$DONE_N" -ge "$EXPECT" ]; then
     touch "$MARKER"
   else
-    echo "[anipals-entrypoint] partial coverage — serving what exists; missing legs resume on next boot"
+    echo "[anipals-entrypoint] partial coverage — serving what exists; PERSISTENT downloader continues in background"
+    # The old design stopped downloading the moment the service started: every
+    # missing leg then waited for the next deploy reboot (40 min cadence, ~35
+    # min window) — the NA pack needed a full day that way. The downloader now
+    # runs alongside the service until every leg carries its .done marker.
+    cat > /tmp/persistent-downloader.sh <<'PDWEOF'
+#!/bin/sh
+while :; do
+  remaining=0
+  while read -r slug; do
+    [ -f "/data/tiles/$slug.done" ] && continue
+    remaining=$((remaining+1))
+    /tmp/leg-download.sh "$slug" || true
+    sleep 5
+  done < /tmp/countries.txt
+  DONE_N=$(find /data/tiles -maxdepth 1 -name '*.done' | wc -l)
+  EXPECT=$(wc -l < /tmp/countries.txt | tr -d ' ')
+  echo "[anipals-entrypoint] persistent downloader pass: $DONE_N/$EXPECT legs done"
+  if [ "$DONE_N" -ge "$EXPECT" ]; then
+    touch /data/tiles/.complete
+    echo "[anipals-entrypoint] ALL LEGS COMPLETE — marker written; next restart boots straight to service"
+    exit 0
+  fi
+  # CDN abuse windows need a cool-down before the next pass; 90s keeps the
+  # background loop gentle while never letting the disk go idle for long.
+  sleep 90
+done
+PDWEOF
+    chmod +x /tmp/persistent-downloader.sh
+    nohup /tmp/persistent-downloader.sh > /data/persistent-downloader.log 2>&1 &
   fi
 fi
 
