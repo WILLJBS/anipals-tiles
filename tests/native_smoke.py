@@ -67,6 +67,11 @@ def main():
             def forbidden(*unused):
                 raise AssertionError('complete graph downloaded again')
             assert prepare_region(root, plan, downloader=forbidden) == descriptor
+        except Exception:
+            from native_diagnose import diagnose
+            region = catalog.candidate(descriptor['slug'], descriptor['fingerprint'])
+            diagnose(region, template, json.loads(engine.config(region).read_text()))
+            raise
         finally:
             engine.close()
     print('NATIVE_REGIONAL_GATE_PASSED', flush=True)

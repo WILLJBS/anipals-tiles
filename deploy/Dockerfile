@@ -20,6 +20,7 @@ COPY deploy/valhalla-image.txt /usr/local/share/anipals-valhalla-image.txt
 COPY deploy/entrypoint.sh /usr/local/bin/anipals-entrypoint.sh
 COPY deploy/regional_*.py tools/validate_tiles.py /usr/local/lib/anipals/
 COPY tests/native_smoke.py /usr/local/lib/anipals/native_smoke.py
+COPY tests/native_diagnose.py /usr/local/lib/anipals/native_diagnose.py
 COPY deploy/coverage.json /usr/local/share/anipals-coverage.json
 COPY deploy/probes.json /usr/local/share/anipals-probes.json
 COPY deploy/tile-release.txt /usr/local/share/anipals-tile-release.txt
