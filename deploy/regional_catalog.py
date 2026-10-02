@@ -3,6 +3,7 @@ import hashlib
 import json
 import math
 import re
+import stat
 from pathlib import Path
 
 
@@ -59,7 +60,16 @@ class Catalog:
         for active in (self.root / 'regions').glob('*/active.json'):
             pointer = json.loads(active.read_text())
             slug = active.parent.name
-            regions[slug] = self.candidate(slug, pointer['fingerprint'])
+            try:
+                regions[slug] = self.candidate(slug, pointer['fingerprint'])
+            except FileNotFoundError:
+                # Activation may retire the pointer just read. Retry exactly
+                # once only when its fingerprint actually changed; corruption
+                # in the current graph remains an observable failure.
+                current = json.loads(active.read_text())
+                if current['fingerprint'] == pointer['fingerprint']:
+                    raise
+                regions[slug] = self.candidate(slug, current['fingerprint'])
         return regions
 
     def candidate(self, slug, fingerprint):
@@ -74,7 +84,11 @@ class Catalog:
         if not tile_dir.is_absolute():
             tile_dir = self.root / tile_dir
         expected = marker.parent / 'tiles'
-        if tile_dir.resolve() != expected.resolve() or not expected.is_dir():
+        if tile_dir.resolve() != expected.resolve():
+            raise ValueError('invalid installed graph path')
+        # stat preserves FileNotFoundError if GC renamed the graph after its
+        # marker was read; an existing non-directory is genuine corruption.
+        if not stat.S_ISDIR(expected.stat().st_mode):
             raise ValueError('invalid installed graph path')
         if descriptor['fingerprint'] != fingerprint or descriptor['slug'] != slug:
             raise ValueError('graph marker identity mismatch')

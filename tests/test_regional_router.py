@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -63,6 +64,53 @@ class GeometryTests(unittest.TestCase):
 
 
 class CatalogTests(unittest.TestCase):
+    def test_activation_gc_during_marker_read_reloads_changed_pointer_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary).resolve(); old='a'*64; new='b'*64
+            install(root,'a',old,active=True); install(root,'a',new); install(root,'b','c'*64,active=True)
+            catalog=Catalog(root,coverage()); original=catalog.candidate; calls=[]
+            def interleave(slug,fingerprint):
+                calls.append((slug,fingerprint))
+                if slug=='a' and fingerprint==old:
+                    (root/'regions/a/active.json').write_text(json.dumps(dict(fingerprint=new,release='test')))
+                    shutil.rmtree(root/'regions/a'/old)
+                return original(slug,fingerprint)
+            with patch.object(catalog,'candidate',side_effect=interleave):
+                available=catalog.available()
+            self.assertEqual(available['a']['fingerprint'],new)
+            self.assertIn('b',available)
+            self.assertEqual([fp for slug,fp in calls if slug=='a'],[old,new])
+
+    def test_activation_gc_after_marker_read_reloads_changed_pointer_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary).resolve(); old='a'*64; new='b'*64
+            install(root,'a',old,active=True); install(root,'a',new)
+            catalog=Catalog(root,coverage()); original=Path.read_text; switched=[]
+            def read(path,*args,**kwargs):
+                text=original(path,*args,**kwargs)
+                if path==root/'regions/a'/old/'.complete.json':
+                    switched.append(True)
+                    (root/'regions/a/active.json').write_text(json.dumps(dict(fingerprint=new,release='test')))
+                    shutil.rmtree(root/'regions/a'/old)
+                return text
+            with patch.object(Path,'read_text',read):
+                self.assertEqual(catalog.available()['a']['fingerprint'],new)
+            self.assertEqual(switched,[True])
+
+    def test_current_missing_or_corrupt_graph_is_not_swallowed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary).resolve(); fp='a'*64
+            install(root,'a',fp,active=True); graph=root/'regions/a'/fp
+            catalog=Catalog(root,coverage()); marker=graph/'.complete.json'; content=marker.read_text()
+            marker.unlink()
+            with self.assertRaises(FileNotFoundError): catalog.available()
+            marker.write_text(content); (graph/'tiles').rmdir()
+            with self.assertRaises(FileNotFoundError): catalog.available()
+            (graph/'tiles').write_text('not a directory')
+            with self.assertRaises(ValueError): catalog.available()
+            marker.write_text('not JSON')
+            with self.assertRaises(ValueError): catalog.available()
+
     def test_unverified_candidate_never_activates_or_displaces_current_graph(self):
         with tempfile.TemporaryDirectory() as root:
             catalog=Catalog(root,coverage())
