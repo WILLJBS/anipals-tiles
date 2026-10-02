@@ -3,21 +3,9 @@ name: valhalla-tiles-build
 # repo). OSM-derived data, ODbL — public repo on purpose: free Actions minutes
 # and public Release assets the Render service pulls without credentials.
 #
-# Independent region graphs must not be overlaid: shared GraphIds have
-# incompatible indexes (docs/integrity-review-2026-10-02.md). The full release
-# gate now rejects conflicting tile inventories; this pipeline is diagnostic
-# until the global graph architecture is resolved. NOTE: a full-run rebuild is
-# triggered by pushing any change to this file (push trigger below); dispatch
-# with a `countries` subset stays a diagnostic draft: no READY or publication.
-# Round 5 (2026-09-29): round 4 unrecoverable — europe/romania failed in the
-# pbf download step (Geofabrik transient), which skips `final` (needs: build)
-# so no READY release can ever publish from that run. This push restarts full.
-# Instead every country
-# matrix job tars its tiles, splits into <=1.9 GB parts (Release asset limit)
-# and uploads them straight to a per-run draft Release. A final job verifies
-# the expected country count and uploads a READY asset; the Render entrypoint
-# only consumes releases that carry READY. The service runs in tile_dir mode
-# (loose .gph files), so no valhalla_build_extract is ever needed.
+# Regional graphs are immutable independent roots. Never overlay their GraphIds.
+# Full builds are expensive and run ONLY on explicit dispatch. Subset diagnostics
+# remain drafts; a full validated roster publishes schema2 isolated-region READY.
 on:
   workflow_dispatch:
     inputs:
@@ -25,13 +13,11 @@ on:
         description: 'Space-separated Geofabrik ids for subset rerun; empty = default set'
         required: false
         default: ''
-  push:
-    paths: ['.github/workflows/build.yml', 'tools/**', 'deploy/regions.json', 'deploy/valhalla-image.txt']
 permissions:
   contents: write
 concurrency:
   group: valhalla-tiles-v3
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   setup:
     runs-on: ubuntu-latest
@@ -42,6 +28,8 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+      - name: Validate exact official coverage
+        run: python3 tools/coverage.py
       - id: set
         env:
           WANT: ${{ github.event.inputs.countries }}
@@ -146,10 +134,10 @@ jobs:
           # releases/tags API endpoint does not return drafts at all).
           TAG="${{ needs.setup.outputs.tag }}"
           gh release download "$TAG" --pattern 'manifest-*.json' --dir manifests --repo "$GITHUB_REPOSITORY"
-          # Validate exact roster, provenance, overlap and part hashes before READY.
+          # Validate exact roster, provenance, per-region inventory and part hashes before READY.
           RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == "'"$TAG"'") | .id')
           gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > release-assets.json
           python3 tools/release_manifest.py ready release-assets.json manifests/*.json > READY
-          gh release upload "$TAG" READY --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" READY deploy/coverage.json --clobber --repo "$GITHUB_REPOSITORY"
           gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
           echo "release published: $TAG"

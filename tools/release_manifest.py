@@ -4,9 +4,15 @@ immutable builder identity and every contiguous shard's size/SHA256 digest.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import re
 from pathlib import Path
+
+
+_spec = importlib.util.spec_from_file_location("region_coverage", Path(__file__).with_name("coverage.py"))
+COVERAGE = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(COVERAGE)
 
 
 def image(path):
@@ -16,24 +22,34 @@ def image(path):
     return value
 
 
-def ready(release, roster, manifests, expected_image):
+def ready(release, roster, manifests, expected_image, coverage):
     wanted = {r['slug'] for r in roster['region']}
     found = {m['slug'] for m in manifests}
     if len(found) != len(manifests) or found != wanted:
         raise ValueError('exact production region roster required; diagnostic subsets cannot publish')
+    polygons = COVERAGE.validate(coverage, roster)
     assets = {a['name']: a for a in release['assets']}
+    if len(assets) != len(release['assets']):
+        raise ValueError('duplicate release asset names')
     declared = {}
-    tile_hashes = {}
+    regional = {}
     for m in manifests:
         if m['image'] != expected_image or m['validation'].get('validator') != 'gph-v3-index-v1' or m['validation']['tiles'] <= 0:
             raise ValueError('missing tile validation or mismatched builder image')
+        polygon = polygons[m['slug']]
+        if m.get('coverage_sha256') != COVERAGE.digest(polygon) or m.get('pbf_url') != polygon['properties']['pbf_url']:
+            raise ValueError('region manifest coverage/PBF provenance mismatch')
         inventory = m['validation'].get('tile_hashes', {})
         if len(inventory) != m['validation']['tiles']:
             raise ValueError('missing per-tile inventory')
         for path, digest in inventory.items():
-            if path in tile_hashes and tile_hashes[path] != digest:
-                raise ValueError('independent regional graphs overlap incompatibly: ' + path)
-            tile_hashes[path] = digest
+            if not re.fullmatch(r'[012]/(?:[0-9]{3}/)*[0-9]{3}\.gph', path) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+                raise ValueError('invalid regional tile inventory')
+        # Independent roots intentionally may reuse paths with different GraphId indexes.
+        # The fingerprint belongs to THIS region only, never a combined overlay.
+        regional[m['slug']] = dict(graph_fingerprint=COVERAGE.digest(inventory),
+            validation=m['validation']['validator'], tiles=m['validation']['tiles'],
+            coverage_sha256=COVERAGE.digest(polygons[m['slug']]), parts=m['parts'])
         parts = m['parts']
         if not parts or [p['name'] for p in parts] != ['tiles-%s.tar-%02d' % (m['slug'], i) for i in range(len(parts))]:
             raise ValueError('missing/duplicate shard sequence')
@@ -45,7 +61,8 @@ def ready(release, roster, manifests, expected_image):
     actual = {n for n in assets if re.fullmatch(r'tiles-[a-z0-9-]+\.tar-\d{2,}', n)}
     if set(declared) != actual:
         raise ValueError('unexpected release shards')
-    return dict(schema=1, production=True, image=expected_image,
+    return dict(schema=2, production=True, graph_layout='isolated-regions-v1', image=expected_image,
+                coverage_sha256=COVERAGE.digest(coverage), region_manifests=regional,
                 regions=sorted(wanted), parts=[declared[n] for n in sorted(declared)])
 
 
@@ -67,12 +84,17 @@ def main():
                 for chunk in iter(lambda: f.read(1024 * 1024), b''):
                     digest.update(chunk)
             parts.append(dict(name=file.name, size=file.stat().st_size, sha256=digest.hexdigest()))
-        result = dict(slug=args.slug, image=pinned,
+        roster = json.loads(Path('deploy/regions.json').read_text())
+        polygons = COVERAGE.validate(json.loads(Path('deploy/coverage.json').read_text()), roster)
+        polygon = polygons[args.slug]
+        result = dict(slug=args.slug, image=pinned, coverage_sha256=COVERAGE.digest(polygon),
+                      pbf_url=polygon['properties']['pbf_url'],
                       validation=json.loads(Path(args.validation).read_text()), parts=parts)
     else:
         result = ready(json.loads(Path(args.release).read_text()),
                        json.loads(Path('deploy/regions.json').read_text()),
-                       [json.loads(Path(f).read_text()) for f in args.manifests], pinned)
+                       [json.loads(Path(f).read_text()) for f in args.manifests], pinned,
+                       json.loads(Path('deploy/coverage.json').read_text()))
     print(json.dumps(result, sort_keys=True))
 
 

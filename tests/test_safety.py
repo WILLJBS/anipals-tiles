@@ -74,12 +74,20 @@ class ReleaseTests(unittest.TestCase):
         release=dict(draft=False,prerelease=False,assets=[dict(name='READY'),
             dict(name=part['name'],size=10,digest='sha256:'+'a'*64,browser_download_url='https://example.com/p')])
         roster={'region':[{'slug':'a','region':'a'}]}
+        coverage = self.coverage(roster)
+        manifest.update(coverage_sha256=MANIFEST.COVERAGE.digest(coverage['features'][0]),
+                        pbf_url=coverage['features'][0]['properties']['pbf_url'])
         return release,roster,manifest
+
+    def coverage(self, roster):
+        features = [dict(type='Feature', properties=dict(id=r['region'], urls=dict(pbf='https://download.geofabrik.de/'+r['region']+'-latest.osm.pbf')),
+                         geometry=dict(type='Polygon', coordinates=[[[0,0],[1,0],[1,1],[0,0]]])) for r in roster['region']]
+        return MANIFEST.COVERAGE.build(dict(type='FeatureCollection', features=features), roster, 'f'*64)
 
     def test_exact_roster_gaps_digest_image_and_collision(self):
         release,roster,m=self.fixture()
         self.assertEqual(len(PLAN.plan(release,roster)),1)
-        self.assertTrue(MANIFEST.ready(release,roster,[m],'pinned')['production'])
+        self.assertTrue(MANIFEST.ready(release,roster,[m],'pinned',self.coverage(roster))['production'])
         for change in ['subset','gap','digest','prerelease']:
             r=json.loads(json.dumps(release)); roster2=json.loads(json.dumps(roster))
             if change=='subset': roster2['region'].append({'slug':'b'})
@@ -87,12 +95,18 @@ class ReleaseTests(unittest.TestCase):
             if change=='digest': del r['assets'][1]['digest']
             if change=='prerelease': r['prerelease']=True
             with self.assertRaises(ValueError): PLAN.plan(r,roster2)
-        with self.assertRaises(ValueError): MANIFEST.ready(release,roster,[m],'other-image')
+        with self.assertRaises(ValueError): MANIFEST.ready(release,roster,[m],'other-image',self.coverage(roster))
         other=json.loads(json.dumps(m)); other['slug']='b'; other['parts'][0]['name']='tiles-b.tar-00'
         other['validation']['tile_hashes']['2/000/000/001.gph']='c'*64
         release['assets'].append(dict(name='tiles-b.tar-00',size=10,digest='sha256:'+'a'*64))
-        roster['region'].append({'slug':'b'})
-        with self.assertRaisesRegex(ValueError,'overlap'): MANIFEST.ready(release,roster,[m,other],'pinned')
+        roster['region'].append({'slug':'b','region':'b'})
+        coverage = self.coverage(roster)
+        other.update(coverage_sha256=MANIFEST.COVERAGE.digest(coverage['features'][1]),
+                     pbf_url=coverage['features'][1]['properties']['pbf_url'])
+        result = MANIFEST.ready(release,roster,[m,other],'pinned',coverage)
+        self.assertEqual(result['graph_layout'],'isolated-regions-v1')
+        self.assertNotEqual(result['region_manifests']['a']['graph_fingerprint'],
+                            result['region_manifests']['b']['graph_fingerprint'])
 
     def test_existing_release_full_roster_remains_readable(self):
         path=Path('/tmp/navwork/release.json')

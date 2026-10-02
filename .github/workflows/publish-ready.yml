@@ -1,20 +1,11 @@
 name: valhalla-publish-ready
-# Rescue for the build pipeline's final step: verify the newest draft release
-# carries every country's shards (one .tar-00 per country), then upload READY
-# and publish it. Round 5 finished 61/61 country legs while `final` failed,
-# stranding a complete draft. Job logs are admin-only, so a failed run writes
-# a public diagnostics file back into the repo — the run explains itself.
-# NOTE (build.yml lesson): no multi-line python heredocs inside YAML block
-# scalars — jq one-liners only.
+# Explicit rescue only. An operator must choose the exact draft; never guess newest.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Target draft tag; empty = newest draft'
-        required: false
-        default: ''
-  push:
-    paths: ['.github/workflows/publish-ready.yml']
+        description: 'Exact target draft release tag'
+        required: true
 permissions:
   contents: write
 concurrency:
@@ -38,12 +29,9 @@ jobs:
             ([.assets[] | select(.name | endswith(".tar-00"))] | length),
             ([.assets[].name] | index("READY") != null)] | @tsv' \
             /tmp/releases.json | tee /tmp/drafts.tsv | sed 's/^/draft: /'
-          # Target = newest draft that already carries the full country set —
-          # an in-flight build's fresh empty draft must never win the pick.
-          MIN_D=$(python3 -c "import json; print(len(json.load(open('deploy/regions.json'))['region']))")
-          TAG=$(awk -F'\t' -v m="$MIN_D" '$3 >= m && $4 == "false" {print $1; exit}' /tmp/drafts.tsv)
-          if [ -n "$WANT" ]; then TAG="$WANT"; fi
-          if [ -z "$TAG" ]; then echo "no complete draft found"; exit 1; fi
+          TAG="$WANT"
+          [[ "$TAG" =~ ^tiles-[A-Za-z0-9.-]+$ ]] || { echo "explicit valid release tag required"; exit 1; }
+          jq -e --arg t "$TAG" '.[] | select(.draft and .tag_name == $t)' /tmp/releases.json > /dev/null
           echo "target=$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           { echo "# publish-ready diagnostics ($(date -u '+%Y-%m-%d %H:%M:%SZ'))";
@@ -69,20 +57,17 @@ jobs:
           gh release download "$TAG" --pattern 'manifest-*.json' --dir manifests --repo "$GITHUB_REPOSITORY"
           jq --arg t "$TAG" '.[] | select(.draft and .tag_name == $t)' /tmp/releases.json > release-assets.json
           python3 tools/release_manifest.py ready release-assets.json manifests/*.json > READY
-          if ! OUT=$(gh release upload "$TAG" READY --clobber --repo "$GITHUB_REPOSITORY" 2>&1); then
+          if ! OUT=$(gh release upload "$TAG" READY deploy/coverage.json --clobber --repo "$GITHUB_REPOSITORY" 2>&1); then
             echo "upload READY failed: $OUT" >> /tmp/diag.md; exit 3; fi
           if ! OUT=$(gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY" 2>&1); then
             echo "publish (edit --draft=false) failed: $OUT" >> /tmp/diag.md; exit 4; fi
           echo "published: $TAG"
-      - name: Commit diagnostics on failure
+      - name: Retain failure diagnostics without pushing to source branches
         if: failure()
-        run: |
-          set -e
-          mkdir -p calibration
-          { echo "# publish-ready diagnostics ($(date -u '+%Y-%m-%d %H:%M:%SZ'))";
-            cat /tmp/diag.md 2>/dev/null || echo '(diagnostics unavailable — failure before resolution)';
-            echo; echo '## trace'; echo '```'; tail -60 /tmp/trace.log 2>/dev/null || echo '(no trace)'; echo '```'; } > calibration/publish-ready-diagnostics.md
-          git config user.name "anipals-tiles-ci"
-          git config user.email "actions@anipals.dev"
-          git add calibration/publish-ready-diagnostics.md
-          git diff --cached --quiet || { git commit -m "chore: publish-ready diagnostics ($(date -u '+%Y-%m-%d'))"; git pull --rebase origin main; git push origin HEAD:main; }
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-ready-diagnostics
+          path: |
+            /tmp/diag.md
+            /tmp/trace.log
+          if-no-files-found: ignore

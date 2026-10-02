@@ -1,30 +1,30 @@
 # anipals-tiles
 
-> **2026-10-02 review:** independently built country graphs cannot be overlaid.
-> Toronto/Montreal succeed on the original Canada graph but fail after overlapping
-> GraphIds are replaced by another region. This local branch adds transfer and
-> collision safety gates; a full rebuild of the same architecture cannot repair
-> global routing. See [evidence and complete repair options](docs/integrity-review-2026-10-02.md).
-> The current 61-region legacy release is approximately 87.46 GB; the historical
-> 31 GB capacity estimate below is obsolete. Production release/cutover remains
-> pending regional graph isolation or a unified graph build.
+AniPals pedestrian navigation uses **61 isolated regional graphs**, selected by
+exact official Geofabrik coverage polygons. Independent extracts reuse GraphIds;
+they must never be overlaid. The regional runtime, bounded native process model,
+activation and legacy migration are described in
+[regional-runtime.md](docs/regional-runtime.md). Local regression tests pass;
+the candidate image's real Canada native gate and production cutover are pending.
 
-Valhalla pedestrian routing tiles for AniPals in-game walking navigation
-(ADR-PLAY-11 in the private `anipals-app` repo).
+The current legacy release is approximately 87.46 GB. The previous 31 GB estimate
+and shared tile-directory runtime are obsolete. Existing archive bytes can be
+reused only as independently validated regional roots. See the
+[root-cause evidence](docs/integrity-review-2026-10-02.md) and
+[release/coverage contract](docs/regional-release-contract.md).
 
-This repo is public on purpose: the tiles are **OpenStreetMap-derived data
-(ODbL license)** and contain no application code — hosting the build here gets
-free Actions minutes and a public Release asset the Render service can pull
-without credentials.
+This public repository contains the OpenStreetMap-derived graph supply and its
+routing runtime. Data is © OpenStreetMap contributors, licensed ODbL. Public
+Release assets allow the service to fetch graphs without application credentials.
 
-- Workflow: `.github/workflows/build.yml` — per-country matrix (6 parallel),
-  each job tars its tiles, splits into <=1.9 GB parts and uploads them to a
-  draft Release; a final job publishes the release with a READY asset once
-  every country has uploaded (subset reruns: dispatch with a `countries`
-  list, e.g. `north-america/us asia/malaysia-singapore-brunei`).
-- There is no global merge: the merged world graph is ~31 GB of tiles — the
-  Render service (deploy/) downloads the per-country tars from the latest
-  READY release into a tile directory and serves it in tile_dir mode.
-- Build cost numbers land in `calibration/` after every run.
+- `.github/workflows/build.yml`: explicit dispatch only; per-region builds,
+  structural validation, <=1.9 GB archive shards, then exact-roster schema 2 READY.
+  A `countries` subset stays a diagnostic draft; use registered ids such as
+  `north-america/canada asia/malaysia-singapore-brunei`.
+- `.github/workflows/deploy-image.yml`: reviewed SHA or staging source changes;
+  local tests and real native candidate checks precede SHA-tagged image publication.
+  It never silently moves a production `latest` tag.
+- `.github/workflows/publish-ready.yml`: explicit validated draft-release rescue.
 
-Tiles built from © OpenStreetMap contributors, data licensed ODbL.
+Run local safety tests with
+`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v`.

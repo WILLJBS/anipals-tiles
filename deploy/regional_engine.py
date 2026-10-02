@@ -1,0 +1,119 @@
+"""Bounded native requests: each process opens exactly one immutable graph.
+
+The official valhalla_service CONFIG ACTION JSON interface provides the same
+actor as HTTP mode. Process isolation also contains native crashes and releases
+all memory after a request; the OS still caches immutable graph file pages.
+"""
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import threading
+import time
+
+
+class EngineError(Exception):
+    def __init__(self, message, status=503):
+        super().__init__(message)
+        self.status = status
+
+
+class Engine:
+    def __init__(self, template, runtime, concurrency=2, timeout=8, memory_mb=768):
+        self.template = template
+        self.runtime = Path(runtime)
+        self.runtime.mkdir(parents=True, exist_ok=True)
+        self.slots = threading.BoundedSemaphore(concurrency)
+        self.timeout, self.memory_mb = timeout, memory_mb
+        self.lock = threading.Lock()
+        self.children = set()
+        self.closed = False
+
+    def config(self, region):
+        path = self.runtime / (region['fingerprint'] + '.json')
+        with self.lock:
+            if not path.exists():
+                config = json.loads(json.dumps(self.template))
+                m = config['mjolnir']
+                m.update(tile_dir=region['tile_dir'], tile_extract='', traffic_extract='',
+                         max_cache_size=64 * 1024 * 1024, use_lru_mem_cache=True,
+                         lru_mem_cache_hard_control=True)
+                config['loki']['use_connectivity'] = False
+                config['loki']['actions'] = ['route', 'locate', 'status']
+                thor = config['thor']
+                for key in list(thor):
+                    if key.startswith('max_reserved_labels_count_'):
+                        thor[key] = 100000
+                thor['clear_reserved_memory'] = True
+                temporary = path.with_suffix('.tmp')
+                temporary.write_text(json.dumps(config))
+                os.replace(temporary, path)
+        return path
+
+    def request(self, region, action, payload, timeout=None):
+        if not self.slots.acquire(timeout=0.2):
+            raise EngineError('native request capacity exhausted')
+        child = None
+        started = time.monotonic()
+        try:
+            config = self.config(region)
+            command = [sys.executable, str(Path(__file__).with_name('regional_native.py')),
+                       str(self.memory_mb), str(config), action, json.dumps(payload)]
+            with self.lock:
+                if self.closed:
+                    raise EngineError('engine draining')
+                child = subprocess.Popen(command, stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE, start_new_session=True)
+                self.children.add(child)
+            try:
+                stdout, stderr = child.communicate(timeout=min(self.timeout, timeout) if timeout is not None else self.timeout)
+            except subprocess.TimeoutExpired:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.communicate()
+                raise EngineError('native request deadline exceeded')
+            if child.returncode:
+                # Coordinates and full native request/output never enter logs.
+                print(json.dumps({'event': 'native_failure', 'region': region['slug'],
+                                  'exit': child.returncode}), flush=True)
+                try:
+                    failure = json.loads(stdout)
+                except (ValueError, UnicodeError):
+                    failure = {}
+                code = failure.get('error_code') if isinstance(failure, dict) else None
+                if code in (170, 171, 172, 442, 443, 444):
+                    raise EngineError('no suitable route in regional graph', 404)
+                raise EngineError('native graph request failed')
+            try:
+                result = json.loads(stdout)
+            except (ValueError, UnicodeError):
+                raise EngineError('native response is not JSON')
+            print(json.dumps({'event': 'native_request', 'region': region['slug'],
+                              'action': action, 'ms': round((time.monotonic()-started)*1000)}), flush=True)
+            return result
+        finally:
+            with self.lock:
+                self.children.discard(child)
+            self.slots.release()
+
+    def close(self):
+        with self.lock:
+            self.closed = True
+            children = list(self.children)
+        for child in children:
+            if child.poll() is None:
+                try:
+                    os.killpg(child.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+        deadline = time.monotonic() + 2
+        for child in children:
+            try:
+                child.wait(timeout=max(.01, deadline-time.monotonic()))
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                child.wait()

@@ -115,3 +115,15 @@ The collision gates here are isolation safety measures. They deliberately stop
 an incompatible graph publication/install. They are not the final architecture
 and must not be presented as restoring worldwide coverage. The61-region scope is
 unchanged; the12-region geographic gap remains a separately tracked decision.
+
+## Regional architecture implementation update
+
+The historical cross-region collision rejection above applies to the unsafe
+overlay architecture. The replacement release contract is now
+[isolated regional schema 2](regional-release-contract.md): retain all regional
+structural and transfer validation, allow cross-region path/hash differences,
+and bind exact official Geofabrik polygons to each separate graph manifest.
+Full graph builds and release rescue require explicit dispatch; image candidates
+use reviewed SHA tags and native route gates rather than silently moving latest.
+This update describes code changes; it does not assert that remote deployment or
+all 61 native regional route checks have completed.

@@ -1,37 +1,79 @@
 name: valhalla-deploy-image
-# Publishes the Render runtime image (deploy/) to GHCR. The image ships the
-# entrypoint that pulls the tile Release onto the persistent disk and serves
-# it with valhalla_service. Public repo → public ghcr image → Render pulls
-# without credentials. Runs when the deploy image sources change or manually.
+# Build/test immutable staging images only. Publishing an image does not deploy it.
+# Production promotion must name a reviewed digest; this workflow never moves latest.
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact 40-character reviewed commit SHA to build'
+        required: true
   push:
+    branches: [staging, codex/navigation-integrity]
     paths:
       - 'deploy/**'
+      - 'tests/**'
+      - 'tools/validate_tiles.py'
+      - 'tools/coverage.py'
+      - 'tools/release_manifest.py'
       - '.github/workflows/deploy-image.yml'
 permissions:
   contents: read
   packages: write
 concurrency:
-  group: valhalla-deploy-image
-  cancel-in-progress: true
+  group: valhalla-staging-image-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve explicit source commit
+        id: source
+        env:
+          REQUESTED: ${{ github.event.inputs.source_sha }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          SHA="${REQUESTED:-$EVENT_SHA}"
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Exact commit SHA required'; exit 1; }
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-      - id: base
-        run: echo "image=$(cat deploy/valhalla-image.txt)" >> "$GITHUB_OUTPUT"
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+      - name: Validate coverage and pinned builder identity
+        id: base
+        run: |
+          python3 tools/coverage.py
+          IMAGE=$(python3 -c "from tools.release_manifest import image; print(image('deploy/valhalla-image.txt'))")
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Run isolated runtime and release contract tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
       - uses: docker/setup-buildx-action@v3
+      - name: Build the exact candidate locally for native verification
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          build-args: |
+            VALHALLA_IMAGE=${{ steps.base.outputs.image }}
+            REVISION=${{ steps.source.outputs.sha }}
+          load: true
+          tags: anipals-valhalla-candidate:${{ steps.source.outputs.sha }}
+      - name: Verify pinned native binary and real isolated Canada routes
+        env:
+          IMAGE: anipals-valhalla-candidate:${{ steps.source.outputs.sha }}
+        run: |
+          docker run --rm --entrypoint valhalla_service "$IMAGE" --version
+          docker run --rm --entrypoint python3 "$IMAGE" /usr/local/lib/anipals/native_smoke.py
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/Dockerfile
-          build-args: VALHALLA_IMAGE=${{ steps.base.outputs.image }}
-          push: true
-          tags: ghcr.io/willjbs/anipals-valhalla:latest
+      - name: Publish only the exact image that passed native verification
+        env:
+          SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/anipals-valhalla"
+          docker tag "anipals-valhalla-candidate:$SHA" "$REGISTRY:sha-$SHA"
+          docker tag "anipals-valhalla-candidate:$SHA" "$REGISTRY:staging-$SHA"
+          docker push "$REGISTRY:sha-$SHA"
+          docker push "$REGISTRY:staging-$SHA"
