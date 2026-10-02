@@ -61,7 +61,6 @@ jobs:
         env:
           IMAGE: anipals-valhalla-candidate:${{ steps.source.outputs.sha }}
         run: |
-          docker run --rm --entrypoint valhalla_service "$IMAGE" --version
           docker run --rm --entrypoint python3 "$IMAGE" /usr/local/lib/anipals/native_smoke.py
       - uses: docker/login-action@v3
         with:

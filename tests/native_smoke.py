@@ -44,6 +44,11 @@ def main():
             catalog = Catalog(root, json.loads((share / 'anipals-coverage.json').read_text()))
             router = Router(catalog, engine, json.loads((share / 'anipals-probes.json').read_text()))
             assert not catalog.available(), 'unverified graph exposed to routing'
+            # Valhalla 3.3's CLI treats --version as a config filename. Its actual
+            # status action is the supported binary-version inspection surface.
+            status = engine.request(catalog.candidate(descriptor['slug'], descriptor['fingerprint']), 'status', {})
+            assert isinstance(status, dict) and isinstance(status.get('version'), str), status
+            print(json.dumps(dict(native_status=status)), flush=True)
             result = router.verify(descriptor['slug'], descriptor['fingerprint'])
             activate_region(root, descriptor, result)
             for name, lat, lon in [('toronto', 43.7064, -79.3986), ('montreal', 45.5088, -73.5878)]:

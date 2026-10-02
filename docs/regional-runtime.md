@@ -73,3 +73,10 @@ checks both historical city locates and real routes, and verifies that completed
 bytes cause no additional download. At the time of this document's update,
 **native container CI and production cutover are pending**. Local mocks and a
 matching image digest do not prove native ABI compatibility or deployed coverage.
+
+The first Linux candidate build and all tests passed, but the standalone
+`valhalla_service --version` probe exited because the pinned 3.3 CLI treats its
+first argument as a config filename. The 3.3 source confirms direct-request mode
+is supported; the gate now obtains the version through its native `status` action
+with a real regional config, before both regression routes. No image from the
+failed gate was published or deployed.
