@@ -5,6 +5,7 @@ actor as HTTP mode. Process isolation also contains native crashes and releases
 all memory after a request; the OS still caches immutable graph file pages.
 """
 import json
+import fcntl
 import os
 from pathlib import Path
 import signal
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from regional_gc import safe_path
 
 
 class EngineError(Exception):
@@ -56,8 +58,25 @@ class Engine:
         if not self.slots.acquire(timeout=0.2):
             raise EngineError('native request capacity exhausted')
         child = None
+        lease = None
         started = time.monotonic()
         try:
+            graph_root = Path(region['tile_dir']).parent
+            try:
+                safe_path(graph_root)
+                lease = os.open(safe_path(graph_root / '.lease.lock'),
+                                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+                fcntl.flock(lease, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                marker = safe_path(graph_root / '.complete.json')
+                safe_path(Path(region['tile_dir']))
+            except (OSError, ValueError) as error:
+                raise EngineError('graph lease unavailable during retirement') from error
+            # A stale candidate must fail before spawning a native reader.
+            if not Path(region['tile_dir']).is_dir() or not marker.is_file():
+                raise EngineError('graph retired before request acquired its lease')
+            identity = json.loads(marker.read_text())
+            if identity.get('fingerprint') != region['fingerprint'] or identity.get('slug') != region['slug']:
+                raise EngineError('graph identity changed before request')
             config = self.config(region)
             command = [sys.executable, str(Path(__file__).with_name('regional_native.py')),
                        str(self.memory_mb), str(config), action, json.dumps(payload)]
@@ -65,7 +84,8 @@ class Engine:
                 if self.closed:
                     raise EngineError('engine draining')
                 child = subprocess.Popen(command, stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE, start_new_session=True)
+                                         stderr=subprocess.PIPE, start_new_session=True,
+                                         pass_fds=(lease,))
                 self.children.add(child)
             try:
                 stdout, stderr = child.communicate(timeout=min(self.timeout, timeout) if timeout is not None else self.timeout)
@@ -93,6 +113,10 @@ class Engine:
                               'action': action, 'ms': round((time.monotonic()-started)*1000)}), flush=True)
             return result
         finally:
+            # Do not explicitly LOCK_UN: the inherited native descriptor keeps
+            # the lease even if the Python router dies before its child exits.
+            if lease is not None:
+                os.close(lease)
             with self.lock:
                 self.children.discard(child)
             self.slots.release()

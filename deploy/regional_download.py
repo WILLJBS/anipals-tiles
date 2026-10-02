@@ -16,6 +16,7 @@ import time
 import urllib.request
 from pathlib import Path
 from regional_storage import atomic_json, digest, extract_parts, require_capacity, sync_dir
+from regional_gc import activate, collect_retired
 
 
 def load_helper(name, candidates):
@@ -145,11 +146,7 @@ def verified(descriptor, result):
 def activate_region(data_root, descriptor, verification):
     if not verified(descriptor, verification):
         raise ValueError('native verification does not match candidate graph')
-    parent = Path(data_root) / 'regions' / descriptor['slug']
-    marker = parent / descriptor['fingerprint'] / '.complete.json'
-    if not marker.exists() or json.loads(marker.read_text()) != descriptor:
-        raise ValueError('cannot activate an incomplete graph')
-    atomic_json(parent / 'active.json', {k: descriptor[k] for k in ('fingerprint', 'release')})
+    activate(data_root, descriptor)
 
 
 def cleanup_legacy(data_root, descriptor, health_callback):
@@ -210,14 +207,22 @@ def run_pass(root, plans, health_callback=verify_native):
     failures = []
     for plan in sorted(plans, key=lambda p: priority(root, p)):
         try:
+            collect_retired(root)
             descriptor = prepare_region(root, plan)
             result = health_callback(descriptor)
             activate_region(root, descriptor, result)
+            collect_retired(root)
             cleanup_legacy(root, descriptor, lambda d: result if d == descriptor else health_callback(d))
             print(json.dumps({'region': plan['slug'], 'state': 'installed'}), flush=True)
         except Exception as error:
             failures.append(plan['slug'])
             print(json.dumps({'region': plan['slug'], 'error': str(error)}), flush=True)
+    try:
+        if collect_retired(root):
+            failures.append('retired-graphs-awaiting-leases')
+    except Exception as error:
+        failures.append('retired-graph-collection')
+        print(json.dumps({'event': 'retired_graph_collection_failed', 'error': str(error)}), flush=True)
     return failures
 
 

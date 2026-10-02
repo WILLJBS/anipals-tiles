@@ -88,7 +88,7 @@ class CatalogTests(unittest.TestCase):
 
 class NativeProcessTests(unittest.TestCase):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory(); self.root=Path(self.temp.name)
+        self.temp=tempfile.TemporaryDirectory(); self.root=Path(self.temp.name).resolve()
         native=self.root/'valhalla_service'
         native.write_text('#!/bin/sh\ncase "$2" in\ncrash) kill -SEGV $$;;\nhang) exec sleep 30;;\nslow) sleep 1; echo \'{"ok":true}\';;\n*) echo \'{"ok":true}\';;\nesac\n')
         native.chmod(0o755)
@@ -101,6 +101,8 @@ class NativeProcessTests(unittest.TestCase):
             self.launch_patch=patch('regional_engine.subprocess.Popen',side_effect=lambda command,**kwargs:launch([str(native)]+command[3:],**kwargs))
             self.launch_patch.start()
         self.region=dict(slug='a',fingerprint='a'*64,tile_dir=str(self.root/'graph-a'))
+        (self.root/'graph-a').mkdir()
+        (self.root/'.complete.json').write_text(json.dumps(self.region))
         self.engine=Engine(dict(mjolnir={},loki={},thor={}),self.root/'config',concurrency=1,timeout=.3)
 
     def tearDown(self):

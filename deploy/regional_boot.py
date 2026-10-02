@@ -97,9 +97,20 @@ def main():
     thread = threading.Thread(target=materialize, daemon=True)
     thread.start()
     try:
+        next_collection = time.monotonic()
         while not stop.wait(1):
             if router.poll() is not None:
                 raise RuntimeError('regional HTTP process exited')
+            if time.monotonic() >= next_collection:
+                from regional_gc import collect_retired
+                try:
+                    collect_retired('/data')
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    # A retirement failure must remain visible and retryable;
+                    # it must not restart healthy readers of the active graph.
+                    print(json.dumps({'event': 'retired_graph_collection_failed',
+                                      'error': str(error)}), flush=True)
+                next_collection = time.monotonic() + 30
     finally:
         terminate()
         deadline = time.monotonic() + 10
