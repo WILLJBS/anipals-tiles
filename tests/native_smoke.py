@@ -49,6 +49,9 @@ def main():
             status = engine.request(catalog.candidate(descriptor['slug'], descriptor['fingerprint']), 'status', {})
             assert isinstance(status, dict) and isinstance(status.get('version'), str), status
             print(json.dumps(dict(native_status=status)), flush=True)
+            from native_diagnose import diagnose
+            region = catalog.candidate(descriptor['slug'], descriptor['fingerprint'])
+            diagnose(region, template, json.loads(engine.config(region).read_text()))
             result = router.verify(descriptor['slug'], descriptor['fingerprint'])
             activate_region(root, descriptor, result)
             for name, lat, lon in [('toronto', 43.7064, -79.3986), ('montreal', 45.5088, -73.5878)]:
@@ -67,11 +70,6 @@ def main():
             def forbidden(*unused):
                 raise AssertionError('complete graph downloaded again')
             assert prepare_region(root, plan, downloader=forbidden) == descriptor
-        except Exception:
-            from native_diagnose import diagnose
-            region = catalog.candidate(descriptor['slug'], descriptor['fingerprint'])
-            diagnose(region, template, json.loads(engine.config(region).read_text()))
-            raise
         finally:
             engine.close()
     print('NATIVE_REGIONAL_GATE_PASSED', flush=True)

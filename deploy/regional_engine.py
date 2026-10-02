@@ -38,8 +38,8 @@ class Engine:
                 config = json.loads(json.dumps(self.template))
                 m = config['mjolnir']
                 m.update(tile_dir=region['tile_dir'], tile_extract='', traffic_extract='',
-                         max_cache_size=64 * 1024 * 1024, use_lru_mem_cache=True,
-                         lru_mem_cache_hard_control=True)
+                         max_cache_size=64 * 1024 * 1024, use_lru_mem_cache=False,
+                         lru_mem_cache_hard_control=False)
                 config['loki']['use_connectivity'] = False
                 config['loki']['actions'] = ['route', 'locate', 'status']
                 thor = config['thor']
