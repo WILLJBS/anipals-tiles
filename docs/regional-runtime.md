@@ -56,11 +56,28 @@ journal authorizes moving/removing the legacy mixed graph; a restart must regain
 native health before continuing deletion. Disk checks account for remaining
 archive bytes plus extraction and reserve, without a third concatenated tar.
 
-This cutover targets a fixed legacy release. Future version turnover needs a
-separate draining and garbage-collection policy: old immutable roots must not be
-removed while an in-flight request still reads them. Activation pointers alone
-do not authorize collecting prior versions. See also the
-[release and official coverage contract](regional-release-contract.md).
+## Retired graph lifecycle — candidate `3588b1a`, awaiting CI/deployment
+
+The live image described below does not yet include the new GC implementation.
+Local `regional_gc.py` serializes activation per region and durably journals the
+previous active fingerprint in `retired.json` **before** switching `active.json`.
+GC considers only these explicitly retired graphs, rechecks that each is no
+longer active, and does not infer deletion permission from directory age, disk
+pressure or the presence of an unactivated candidate.
+
+A native request holds a shared file-lock lease on its graph. The child inherits
+the lease file descriptor, so a router crash does not release protection while
+the native reader still runs. GC requires a nonblocking exclusive lease; busy
+graphs remain queued. An eligible graph is atomically renamed to a deletion
+tombstone before removal, allowing interrupted deletion to resume. The boot
+supervisor retries collection every 30 seconds, in addition to materializer
+collection points. Old versions are reclaimable after their readers finish;
+this is not an indefinite rollback archive.
+
+These lifecycle changes still require CI, deployment and operational acceptance.
+Until then, do not assume old regional versions are automatically reclaimed in
+production. The existing mixed-root migration is a separate one-time cleanup.
+See also the [release and official coverage contract](regional-release-contract.md).
 
 ## Verification status
 
@@ -87,8 +104,11 @@ the native version via the supported `status` action with a regional config.
 
 The verified image digest is
 `sha256:68dd497fe2d837dda462c509dc84f9be19062189ba25f34d520546cbb89d329a`.
-Render's fixed-digest cutover has begun without changing service cost settings.
-**Production acceptance remains pending**: verify the deployed digest, complete
-migration of all 61 independent regional graphs and the 163-city scan. Passing
-Canada native CI does not establish that every region is installed or every
-production city route is healthy.
+Production now pins that exact image digest without a service-cost change.
+Canada (`north-america-canada`) and US South (`north-america-us-south`) are confirmed
+installed; API `68fa5da` is live and web/play `68fa` is READY. **Full migration and
+coverage acceptance remain pending**: all 61 independent graphs must finish
+migration and the 163-city scan must classify the 149 coordinates within extract
+envelopes and 14 outside. Envelope membership does not itself prove a route.
+The GC candidate `3588b1a` passes all 46 local tests and is awaiting Linux native
+CI/deployment. It is not included in this live image or its 35-test CI result.

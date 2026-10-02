@@ -6,8 +6,11 @@ they must never be overlaid. The regional runtime, bounded native process model,
 activation and legacy migration are described in
 [regional-runtime.md](docs/regional-runtime.md). [Linux CI](https://github.com/WILLJBS/anipals-tiles/actions/runs/36983580857) passed
 35 tests and real Valhalla 3.3.0 Canada routes with the final flat-cache policy.
-The fixed-digest production cutover has begun; acceptance of all 61 regional
-migrations and the 163-city scan is still pending.
+Production now pins the verified image digest; Canada and US South are confirmed
+installed. API `68fa5da` is live and web/play `68fa` is READY. Migration of all 61
+regions and the 163-city scan remain incomplete. The new lease-based retired-graph
+GC candidate `3588b1a` passes 46 local tests and awaits native CI/deployment;
+it is not part of the live image.
 
 The current legacy release is approximately 87.46 GB. The previous 31 GB estimate
 and shared tile-directory runtime are obsolete. Existing archive bytes can be

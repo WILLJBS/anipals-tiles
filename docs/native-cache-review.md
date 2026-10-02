@@ -6,9 +6,10 @@ for tiles commit `2799fcb` passed with the actual Valhalla 3.3.0 binary, 35 Linu
 tests, the complete original Canada graph and both final native routes. No gdb
 backtrace was captured: the configuration trigger is established, but the exact
 failing instruction and the pointer-lifetime mechanism below remain unconfirmed.
-Production digest cutover has begun separately; migration of all 61 regional
-graphs and the 163-city scan still require acceptance. CI success does not mean
-all production navigation is repaired.
+Production now pins that verified image; Canada and US South are confirmed
+installed. Migration of all 61 regional graphs and the 163-city scan still
+require acceptance. CI success and these installed regions do not establish
+that all production navigation is repaired.
 
 The original failure was a complete-Canada locate exiting with SIGSEGV (-11)
 after approximately 2.8 seconds, despite a passing structural walk and native
@@ -96,5 +97,7 @@ The final flat-cache configuration passed native routes: Toronto **0.362 km in
 154 ms**, Montreal **0.551 km in 165 ms**. The tested published image digest is
 `sha256:68dd497fe2d837dda462c509dc84f9be19062189ba25f34d520546cbb89d329a`.
 Native concurrency, deadline and 768 MiB address-space limits remain in force;
-64 MiB is only the flat-cache soft target. Production verification must still
-confirm the exact digest, independent graph migration and the full city scan.
+64 MiB is only the flat-cache soft target. The production digest is now pinned;
+remaining acceptance covers complete independent graph migration and the full
+city scan. Lease-based old-graph GC added afterward is still local code awaiting
+CI/deployment (`3588b1a`, 46 local tests passed) and is not covered by this image's native test evidence.
