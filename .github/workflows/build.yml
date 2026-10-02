@@ -3,11 +3,12 @@ name: valhalla-tiles-build
 # repo). OSM-derived data, ODbL — public repo on purpose: free Actions minutes
 # and public Release assets the Render service pulls without credentials.
 #
-# Architecture (v2): there is NO global merge — the merged world graph is
-# ~31 GB of tiles, far beyond a 14 GB runner disk. NOTE: a full-run rebuild is
+# Independent region graphs must not be overlaid: shared GraphIds have
+# incompatible indexes (docs/integrity-review-2026-10-02.md). The full release
+# gate now rejects conflicting tile inventories; this pipeline is diagnostic
+# until the global graph architecture is resolved. NOTE: a full-run rebuild is
 # triggered by pushing any change to this file (push trigger below); dispatch
-# with a `countries` subset only ever publishes a PARTIAL release (each run
-# makes its own draft release), so subset runs are for diagnosis, not delivery.
+# with a `countries` subset stays a diagnostic draft: no READY or publication.
 # Round 5 (2026-09-29): round 4 unrecoverable — europe/romania failed in the
 # pbf download step (Geofabrik transient), which skips `final` (needs: build)
 # so no READY release can ever publish from that run. This push restarts full.
@@ -25,7 +26,7 @@ on:
         required: false
         default: ''
   push:
-    paths: ['.github/workflows/build.yml']
+    paths: ['.github/workflows/build.yml', 'tools/**', 'deploy/regions.json', 'deploy/valhalla-image.txt']
 permissions:
   contents: write
 concurrency:
@@ -37,27 +38,21 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       count: ${{ steps.set.outputs.count }}
+      production: ${{ steps.set.outputs.production }}
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - id: set
-        run: |
-          if [ -n "${{ github.event.inputs.countries }}" ]; then
-            # subset rerun: "europe/ireland europe/spain" → matrix json (single-line
-            # python: a multi-line heredoc breaks the surrounding YAML block scalar)
-            REGIONS=$(echo "${{ github.event.inputs.countries }}" | tr ' ' '\n' | python3 -c "import json,sys; rs=[l.strip() for l in sys.stdin if l.strip()]; print(json.dumps({'region':[{'region':r,'slug':r.replace('/','-')} for r in rs]}))")
-          else
-            REGIONS='{"region":[{"region":"europe/france","slug":"europe-france"},{"region":"europe/germany","slug":"europe-germany"},{"region":"europe/united-kingdom","slug":"europe-united-kingdom"},{"region":"europe/spain","slug":"europe-spain"},{"region":"europe/italy","slug":"europe-italy"},{"region":"europe/netherlands","slug":"europe-netherlands"},{"region":"europe/belgium","slug":"europe-belgium"},{"region":"europe/austria","slug":"europe-austria"},{"region":"europe/switzerland","slug":"europe-switzerland"},{"region":"europe/portugal","slug":"europe-portugal"},{"region":"europe/poland","slug":"europe-poland"},{"region":"europe/czech-republic","slug":"europe-czech-republic"},{"region":"europe/hungary","slug":"europe-hungary"},{"region":"europe/romania","slug":"europe-romania"},{"region":"europe/greece","slug":"europe-greece"},{"region":"europe/sweden","slug":"europe-sweden"},{"region":"europe/norway","slug":"europe-norway"},{"region":"europe/denmark","slug":"europe-denmark"},{"region":"europe/finland","slug":"europe-finland"},{"region":"europe/ireland-and-northern-ireland","slug":"europe-ireland-and-northern-ireland"},{"region":"russia","slug":"russia"},{"region":"europe/ukraine","slug":"europe-ukraine"},{"region":"europe/turkey","slug":"europe-turkey"},{"region":"asia/china","slug":"asia-china"},{"region":"asia/japan","slug":"asia-japan"},{"region":"asia/india","slug":"asia-india"},{"region":"asia/thailand","slug":"asia-thailand"},{"region":"asia/vietnam","slug":"asia-vietnam"},{"region":"asia/indonesia","slug":"asia-indonesia"},{"region":"asia/israel-and-palestine","slug":"asia-israel-and-palestine"},{"region":"asia/gcc-states","slug":"asia-gcc-states"},{"region":"asia/philippines","slug":"asia-philippines"},{"region":"asia/malaysia-singapore-brunei","slug":"asia-malaysia-singapore-brunei"},{"region":"asia/pakistan","slug":"asia-pakistan"},{"region":"north-america/us-west","slug":"north-america-us-west"},{"region":"north-america/us-south","slug":"north-america-us-south"},{"region":"north-america/us-midwest","slug":"north-america-us-midwest"},{"region":"north-america/us-northeast","slug":"north-america-us-northeast"},{"region":"north-america/us-pacific","slug":"north-america-us-pacific"},{"region":"north-america/canada","slug":"north-america-canada"},{"region":"north-america/mexico","slug":"north-america-mexico"},{"region":"south-america/brazil","slug":"south-america-brazil"},{"region":"south-america/argentina","slug":"south-america-argentina"},{"region":"south-america/peru","slug":"south-america-peru"},{"region":"south-america/colombia","slug":"south-america-colombia"},{"region":"south-america/ecuador","slug":"south-america-ecuador"},{"region":"central-america/panama","slug":"central-america-panama"},{"region":"central-america/costa-rica","slug":"central-america-costa-rica"},{"region":"australia-oceania/australia","slug":"australia-oceania-australia"},{"region":"australia-oceania/new-zealand","slug":"australia-oceania-new-zealand"},{"region":"africa/egypt","slug":"africa-egypt"},{"region":"africa/morocco","slug":"africa-morocco"},{"region":"africa/algeria","slug":"africa-algeria"},{"region":"africa/tunisia","slug":"africa-tunisia"},{"region":"africa/south-africa","slug":"africa-south-africa"},{"region":"africa/nigeria","slug":"africa-nigeria"},{"region":"africa/ghana","slug":"africa-ghana"},{"region":"africa/kenya","slug":"africa-kenya"},{"region":"africa/tanzania","slug":"africa-tanzania"},{"region":"africa/rwanda","slug":"africa-rwanda"},{"region":"africa/ethiopia","slug":"africa-ethiopia"}]}'
-          fi
-          echo "matrix=$REGIONS" >> $GITHUB_OUTPUT
-          # country count for the READY gate
-          COUNT=$(echo "$REGIONS" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['region']))")
-          echo "count=$COUNT" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v4
+      - id: set
+        env:
+          WANT: ${{ github.event.inputs.countries }}
+        run: python3 tools/regions.py "$WANT"
       - id: tag
         run: |
           # draft release: assets upload during the matrix; the final job flips
           # it to published by uploading READY once the expected count is there
-          TAG="tiles-$(date -u +%Y%m%d)-${{ github.run_number }}"
+          PREFIX=tiles
+          if [ "${{ steps.set.outputs.production }}" != "true" ]; then PREFIX=tiles-diagnostic; fi
+          TAG="$PREFIX-$(date -u +%Y%m%d)-${{ github.run_number }}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           gh release create "$TAG" --draft --title "$TAG" --notes "Valhalla pedestrian tiles (per-country tars, tile_dir mode). OSM-derived (ODbL)."
         env:
@@ -96,12 +91,15 @@ jobs:
           sudo rm -f /swapfile
           sudo fallocate -l 6G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile || echo "swap setup failed (continuing)"
           free -h | tee -a calib.txt
+          VALHALLA_IMAGE=$(cat deploy/valhalla-image.txt)
           mkdir -p tiles
-          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest valhalla_build_config \
-            --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 2 \
+          # Reduced concurrency bounds memory pressure; it is not evidence of
+          # corruption's cause. The independent index/digest gates remain mandatory.
+          docker run --rm -v "$PWD:/data" "$VALHALLA_IMAGE" valhalla_build_config \
+            --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 1 \
             > valhalla_config.json
           set -o pipefail
-          docker run --rm -v "$PWD:/data" valhalla/valhalla:run-latest bash -c '
+          docker run --rm -v "$PWD:/data" "$VALHALLA_IMAGE" bash -c '
             set -e -o pipefail
             apt-get update -qq && apt-get install -y -qq time >/dev/null
             echo "=== admins ==="
@@ -112,11 +110,17 @@ jobs:
           ' 2>&1 | tee build.log
           grep -E "=== |Maximum resident|Elapsed \(wall|CRITICAL" build.log | tee -a calib.txt
           du -sh tiles | tee -a calib.txt
+          # Export is a semantic smoke only: it skips unnamed/shortcut/transit
+          # edges and does not validate every node span or spatial bin reference.
+          # The strict road-tile ABI/index check below covers every .gph independently.
+          python3 tools/validate_tiles.py tiles > tile-validation.json
+          jq 'del(.tile_hashes)' tile-validation.json | tee -a calib.txt
           # free disk BEFORE tar: pbf+filtered can be 12 GB (US), and tar needs
           # a tiles-sized copy — both at once exceeded the 14 GB runner disk
           sudo rm -rf raw.osm.pbf filtered.osm.pbf build.log
           # stream straight to <=1.9 GB parts (no full-size tar on disk)
           tar -cf - tiles | split -d -b 1900M - "tiles-${{ matrix.region.slug }}.tar-"
+          python3 tools/release_manifest.py region "${{ matrix.region.slug }}" tile-validation.json tiles-${{ matrix.region.slug }}.tar-* > manifest-${{ matrix.region.slug }}.json
           sudo rm -rf tiles
           ls -lh tiles-*.tar-* | tee -a calib.txt
           df -h / | tail -1 | tee -a calib.txt
@@ -124,12 +128,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ needs.setup.outputs.tag }}" tiles-${{ matrix.region.slug }}.tar-* --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "${{ needs.setup.outputs.tag }}" tiles-${{ matrix.region.slug }}.tar-* manifest-${{ matrix.region.slug }}.json --clobber --repo "$GITHUB_REPOSITORY"
           echo "uploaded: ${{ matrix.region.slug }}" | tee -a calib.txt
   final:
     runs-on: ubuntu-latest
     needs: [setup, build]
+    if: needs.setup.outputs.production == 'true'
     steps:
+      - uses: actions/checkout@v4
       - name: Publish the release (READY gate)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -139,7 +145,11 @@ jobs:
           # gh release upload/edit resolve drafts correctly (the plain
           # releases/tags API endpoint does not return drafts at all).
           TAG="${{ needs.setup.outputs.tag }}"
-          echo "ok" > READY
+          gh release download "$TAG" --pattern 'manifest-*.json' --dir manifests --repo "$GITHUB_REPOSITORY"
+          # Validate exact roster, provenance, overlap and part hashes before READY.
+          RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == "'"$TAG"'") | .id')
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > release-assets.json
+          python3 tools/release_manifest.py ready release-assets.json manifests/*.json > READY
           gh release upload "$TAG" READY --clobber --repo "$GITHUB_REPOSITORY"
           gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
           echo "release published: $TAG"

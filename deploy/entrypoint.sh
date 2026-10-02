@@ -4,10 +4,10 @@
 # asset. Assets are per-country tars split into <=1.9 GB parts — download all
 # parts, concatenate per country, untar into /data/tiles (flat .gph tree) and
 # serve the graph in tile_dir mode (no valhalla_build_extract anywhere: the
-# merged world graph is ~31 GB, beyond any runner or a build step here).
+# previous full release is 87.46 GB; safe global composition remains blocked).
 #
 # Deploy-window strategy (2026-09-30): Render kills a deploy whose process
-# never binds its port. Downloading 31 GB up front takes 20-60 min — far past
+# never binds its port. Downloading the full release up front runs far past
 # that window ("Timed Out" after ~5 min). So: bind a placeholder HTTP server
 # FIRST (/status reports not-ready until the marker exists, /route 503), keep
 # downloading in the background, then hand the port to the real service.
@@ -25,7 +25,7 @@ mkdir -p "$TILES_DIR"
 # deploy): the first pull round predated the per-country .done markers, so
 # orphaned partial tars + unmarked extractions filled the disk and a resumable
 # retry cannot distinguish them. Wipe once, then the marked single pass fits
-# (31 GB tiles + <=8 GB transient on the 50 GB disk).
+# (87.46 GB release; the deployment now needs the provisioned 150 GB disk).
 if [ "${RESET_TILES:-0}" = "1" ]; then
   echo "[anipals-entrypoint] RESET_TILES=1 — wiping $TILES_DIR for a clean marked pass"
   rm -rf "$TILES_DIR"
@@ -74,25 +74,9 @@ sys.exit(23 if not assets else 0)
 print(r["tag_name"])' || { echo "[anipals-entrypoint] latest release has no READY asset yet; aborting"; exit 23; }
   TAG=$(echo "$RELEASE_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
   echo "[anipals-entrypoint] fetching tiles from $TAG"
-  echo "$RELEASE_JSON" | python3 -c '
-import json,sys
-r=json.load(sys.stdin)
-for a in sorted(r["assets"], key=lambda a: a["name"]):
-    if a["name"].endswith(".tar-00"):
-        print(a["name"][: -len(".tar-00")])' > /tmp/countries.txt
-  # Pre-resolve slug -> part URLs to a TSV file. The 61-country release JSON
-  # is ~85 assets; inlining $RELEASE_JSON into the xargs child shell blew the
-  # exec arg limit ("xargs: Argument list too long", 2026-09-30) — the child
-  # now reads only its own URLs from /tmp/part-urls.txt (a few hundred bytes).
-  echo "$RELEASE_JSON" | python3 -c '
-import json,sys
-r=json.load(sys.stdin)
-for a in sorted(r["assets"], key=lambda a: a["name"]):
-    if a["name"].endswith(".tar-00"):
-        slug=a["name"][:-len(".tar-00")]
-        for b in r["assets"]:
-            if b["name"].startswith(slug+".tar-"):
-                print(slug+"\t"+b["browser_download_url"])' > /tmp/part-urls.txt
+  # Reject subsets, gaps and assets without exact size/SHA256 before writes.
+  printf '%s' "$RELEASE_JSON" | python3 /usr/local/bin/release-plan.py /usr/local/share/anipals-regions.json > /tmp/part-urls.txt
+  cut -f1 /tmp/part-urls.txt | sort -u > /tmp/countries.txt
   # download+extract countries in parallel (4 workers); parts re-joined via
   # append so no full-size tar ever sits on disk next to its parts. A country
   # whose tiles are already on disk (previous boot) is skipped — resumable
@@ -110,26 +94,34 @@ slug="$1"
 set -e
 # Stagger concurrent leg starts (release-CDN abuse limits trip after ~15-20
 # back-to-back large downloads); a bounded pause trades seconds for per-pass yield.
-sleep $((RANDOM % PAUSE))
+sleep "$PAUSE"
 echo "[anipals-entrypoint] $slug"
 # Per-part files + curl -C - resume: a killed big download keeps its bytes
 # and the next pass continues the same part instead of restarting from zero
 # (the NA legs died mid-transfer every boot under truncate-and-retry).
-grep "^$slug	" /tmp/part-urls.txt | cut -f2 > "/tmp/$slug.urls"
+awk -F '\t' -v s="$slug" '$1==s' /tmp/part-urls.txt > "/tmp/$slug.urls"
 n=0
-while read -r url; do
+TAB=$(printf '\t')
+while IFS="$TAB" read -r _ url size digest; do
   f="/data/tiles/$slug.part-$n"
-  curl -sfL -C - --retry 5 --retry-delay 10 "$url" -o "$f" || {
-    code=$?
-    echo "[anipals-entrypoint] $slug part $n FAILED curl_exit=$code size=$(wc -c < "$f" 2>/dev/null || echo 0) head=[$(head -c 120 "$f" 2>/dev/null | tr -d '\0' | tr '\n' ' ')]"
-    exit 1; }
+  /usr/local/bin/download-part.sh "$f" "$url" "$size" "$digest"
   n=$((n+1))
 done < "/tmp/$slug.urls"
 # A truncated/garbage tar (CDN rate-limit page, ENOSPC) must fail the leg
 # loudly: unconditional .done markers froze damage in place (06:00 pull).
-cat $(ls /data/tiles/$slug.part-* | sort) > "/data/tiles/$slug.tar"
+# Rejoin only the current manifest's parts, in numeric order (10 follows 9);
+# stray files from an interrupted older release must not enter the archive.
+: > "/data/tiles/$slug.tar"
+i=0
+while [ "$i" -lt "$n" ]; do
+  cat "/data/tiles/$slug.part-$i" >> "/data/tiles/$slug.tar"
+  i=$((i+1))
+done
 tar -tf "/data/tiles/$slug.tar" > /dev/null
-tar -xf "/data/tiles/$slug.tar" -C /data/tiles
+stage="/data/tiles/.stage-$slug"
+rm -rf "$stage"; mkdir -p "$stage"
+python3 /usr/local/bin/install-tiles.py "/data/tiles/$slug.tar" "$stage" /data/tiles || { rm -rf "$stage"; exit 1; }
+rm -rf "$stage"
 rm -f /data/tiles/$slug.part-* "/data/tiles/$slug.tar"
 touch "/data/tiles/$slug.done"
 LEGEOF
@@ -179,7 +171,7 @@ fi
 # The per-country tars carry a tiles/ prefix; if an older entrypoint version
 # unpacked them without --strip-components the graph sits one level too deep
 # (valhalla reads /data/tiles/0/... and finds nothing). Flatten in place —
-# cheaper than re-downloading 31 GB.
+# avoids re-downloading the existing release.
 if [ -d "$TILES_DIR/tiles" ]; then
   echo "[anipals-entrypoint] flattening nested tiles/ directory"
   find "$TILES_DIR/tiles" -type d -exec chmod 755 {} + 2>/dev/null || true

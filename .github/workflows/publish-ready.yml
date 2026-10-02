@@ -9,10 +9,6 @@ name: valhalla-publish-ready
 on:
   workflow_dispatch:
     inputs:
-      min_countries:
-        description: 'Min distinct country slugs required on the draft'
-        required: false
-        default: '61'
       tag:
         description: 'Target draft tag; empty = newest draft'
         required: false
@@ -44,7 +40,7 @@ jobs:
             /tmp/releases.json | tee /tmp/drafts.tsv | sed 's/^/draft: /'
           # Target = newest draft that already carries the full country set —
           # an in-flight build's fresh empty draft must never win the pick.
-          MIN_D="${{ github.event.inputs.min_countries || '61' }}"
+          MIN_D=$(python3 -c "import json; print(len(json.load(open('deploy/regions.json'))['region']))")
           TAG=$(awk -F'\t' -v m="$MIN_D" '$3 >= m && $4 == "false" {print $1; exit}' /tmp/drafts.tsv)
           if [ -n "$WANT" ]; then TAG="$WANT"; fi
           if [ -z "$TAG" ]; then echo "no complete draft found"; exit 1; fi
@@ -55,7 +51,6 @@ jobs:
       - name: Verify country parts, upload READY, publish
         env:
           GH_TOKEN: ${{ github.token }}
-          MIN: ${{ github.event.inputs.min_countries || '61' }}
           TAG: ${{ steps.diag.outputs.tag }}
         run: |
           set -e -o pipefail
@@ -68,9 +63,12 @@ jobs:
             '.[] | select(.draft and .tag_name == $t)
               | [.assets[] | select(.name | endswith(".tar-00"))] | length' \
             /tmp/releases.json)
-          echo "country slugs: $SLUGS (min $MIN)"
+          MIN=$(python3 -c "import json; print(len(json.load(open('deploy/regions.json'))['region']))")
+          echo "country slugs: $SLUGS (required $MIN)"
           [ "$SLUGS" -ge "$MIN" ] || { echo "incomplete supply — refusing to publish"; exit 2; }
-          echo "ok" > READY
+          gh release download "$TAG" --pattern 'manifest-*.json' --dir manifests --repo "$GITHUB_REPOSITORY"
+          jq --arg t "$TAG" '.[] | select(.draft and .tag_name == $t)' /tmp/releases.json > release-assets.json
+          python3 tools/release_manifest.py ready release-assets.json manifests/*.json > READY
           if ! OUT=$(gh release upload "$TAG" READY --clobber --repo "$GITHUB_REPOSITORY" 2>&1); then
             echo "upload READY failed: $OUT" >> /tmp/diag.md; exit 3; fi
           if ! OUT=$(gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY" 2>&1); then

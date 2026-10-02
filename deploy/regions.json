@@ -1,0 +1,248 @@
+{
+  "region": [
+    {
+      "region": "europe/france",
+      "slug": "europe-france"
+    },
+    {
+      "region": "europe/germany",
+      "slug": "europe-germany"
+    },
+    {
+      "region": "europe/united-kingdom",
+      "slug": "europe-united-kingdom"
+    },
+    {
+      "region": "europe/spain",
+      "slug": "europe-spain"
+    },
+    {
+      "region": "europe/italy",
+      "slug": "europe-italy"
+    },
+    {
+      "region": "europe/netherlands",
+      "slug": "europe-netherlands"
+    },
+    {
+      "region": "europe/belgium",
+      "slug": "europe-belgium"
+    },
+    {
+      "region": "europe/austria",
+      "slug": "europe-austria"
+    },
+    {
+      "region": "europe/switzerland",
+      "slug": "europe-switzerland"
+    },
+    {
+      "region": "europe/portugal",
+      "slug": "europe-portugal"
+    },
+    {
+      "region": "europe/poland",
+      "slug": "europe-poland"
+    },
+    {
+      "region": "europe/czech-republic",
+      "slug": "europe-czech-republic"
+    },
+    {
+      "region": "europe/hungary",
+      "slug": "europe-hungary"
+    },
+    {
+      "region": "europe/romania",
+      "slug": "europe-romania"
+    },
+    {
+      "region": "europe/greece",
+      "slug": "europe-greece"
+    },
+    {
+      "region": "europe/sweden",
+      "slug": "europe-sweden"
+    },
+    {
+      "region": "europe/norway",
+      "slug": "europe-norway"
+    },
+    {
+      "region": "europe/denmark",
+      "slug": "europe-denmark"
+    },
+    {
+      "region": "europe/finland",
+      "slug": "europe-finland"
+    },
+    {
+      "region": "europe/ireland-and-northern-ireland",
+      "slug": "europe-ireland-and-northern-ireland"
+    },
+    {
+      "region": "russia",
+      "slug": "russia"
+    },
+    {
+      "region": "europe/ukraine",
+      "slug": "europe-ukraine"
+    },
+    {
+      "region": "europe/turkey",
+      "slug": "europe-turkey"
+    },
+    {
+      "region": "asia/china",
+      "slug": "asia-china"
+    },
+    {
+      "region": "asia/japan",
+      "slug": "asia-japan"
+    },
+    {
+      "region": "asia/india",
+      "slug": "asia-india"
+    },
+    {
+      "region": "asia/thailand",
+      "slug": "asia-thailand"
+    },
+    {
+      "region": "asia/vietnam",
+      "slug": "asia-vietnam"
+    },
+    {
+      "region": "asia/indonesia",
+      "slug": "asia-indonesia"
+    },
+    {
+      "region": "asia/israel-and-palestine",
+      "slug": "asia-israel-and-palestine"
+    },
+    {
+      "region": "asia/gcc-states",
+      "slug": "asia-gcc-states"
+    },
+    {
+      "region": "asia/philippines",
+      "slug": "asia-philippines"
+    },
+    {
+      "region": "asia/malaysia-singapore-brunei",
+      "slug": "asia-malaysia-singapore-brunei"
+    },
+    {
+      "region": "asia/pakistan",
+      "slug": "asia-pakistan"
+    },
+    {
+      "region": "north-america/us-west",
+      "slug": "north-america-us-west"
+    },
+    {
+      "region": "north-america/us-south",
+      "slug": "north-america-us-south"
+    },
+    {
+      "region": "north-america/us-midwest",
+      "slug": "north-america-us-midwest"
+    },
+    {
+      "region": "north-america/us-northeast",
+      "slug": "north-america-us-northeast"
+    },
+    {
+      "region": "north-america/us-pacific",
+      "slug": "north-america-us-pacific"
+    },
+    {
+      "region": "north-america/canada",
+      "slug": "north-america-canada"
+    },
+    {
+      "region": "north-america/mexico",
+      "slug": "north-america-mexico"
+    },
+    {
+      "region": "south-america/brazil",
+      "slug": "south-america-brazil"
+    },
+    {
+      "region": "south-america/argentina",
+      "slug": "south-america-argentina"
+    },
+    {
+      "region": "south-america/peru",
+      "slug": "south-america-peru"
+    },
+    {
+      "region": "south-america/colombia",
+      "slug": "south-america-colombia"
+    },
+    {
+      "region": "south-america/ecuador",
+      "slug": "south-america-ecuador"
+    },
+    {
+      "region": "central-america/panama",
+      "slug": "central-america-panama"
+    },
+    {
+      "region": "central-america/costa-rica",
+      "slug": "central-america-costa-rica"
+    },
+    {
+      "region": "australia-oceania/australia",
+      "slug": "australia-oceania-australia"
+    },
+    {
+      "region": "australia-oceania/new-zealand",
+      "slug": "australia-oceania-new-zealand"
+    },
+    {
+      "region": "africa/egypt",
+      "slug": "africa-egypt"
+    },
+    {
+      "region": "africa/morocco",
+      "slug": "africa-morocco"
+    },
+    {
+      "region": "africa/algeria",
+      "slug": "africa-algeria"
+    },
+    {
+      "region": "africa/tunisia",
+      "slug": "africa-tunisia"
+    },
+    {
+      "region": "africa/south-africa",
+      "slug": "africa-south-africa"
+    },
+    {
+      "region": "africa/nigeria",
+      "slug": "africa-nigeria"
+    },
+    {
+      "region": "africa/ghana",
+      "slug": "africa-ghana"
+    },
+    {
+      "region": "africa/kenya",
+      "slug": "africa-kenya"
+    },
+    {
+      "region": "africa/tanzania",
+      "slug": "africa-tanzania"
+    },
+    {
+      "region": "africa/rwanda",
+      "slug": "africa-rwanda"
+    },
+    {
+      "region": "africa/ethiopia",
+      "slug": "africa-ethiopia"
+    }
+  ]
+}

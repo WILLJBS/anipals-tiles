@@ -1,5 +1,14 @@
 # anipals-tiles
 
+> **2026-10-02 review:** independently built country graphs cannot be overlaid.
+> Toronto/Montreal succeed on the original Canada graph but fail after overlapping
+> GraphIds are replaced by another region. This local branch adds transfer and
+> collision safety gates; a full rebuild of the same architecture cannot repair
+> global routing. See [evidence and complete repair options](docs/integrity-review-2026-10-02.md).
+> The current 61-region legacy release is approximately 87.46 GB; the historical
+> 31 GB capacity estimate below is obsolete. Production release/cutover remains
+> pending regional graph isolation or a unified graph build.
+
 Valhalla pedestrian routing tiles for AniPals in-game walking navigation
 (ADR-PLAY-11 in the private `anipals-app` repo).
 
