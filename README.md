@@ -4,8 +4,10 @@ AniPals pedestrian navigation uses **61 isolated regional graphs**, selected by
 exact official Geofabrik coverage polygons. Independent extracts reuse GraphIds;
 they must never be overlaid. The regional runtime, bounded native process model,
 activation and legacy migration are described in
-[regional-runtime.md](docs/regional-runtime.md). Local regression tests pass;
-the candidate image's real Canada native gate and production cutover are pending.
+[regional-runtime.md](docs/regional-runtime.md). [Linux CI](https://github.com/WILLJBS/anipals-tiles/actions/runs/36983580857) passed
+35 tests and real Valhalla 3.3.0 Canada routes with the final flat-cache policy.
+The fixed-digest production cutover has begun; acceptance of all 61 regional
+migrations and the 163-city scan is still pending.
 
 The current legacy release is approximately 87.46 GB. The previous 31 GB estimate
 and shared tile-directory runtime are obsolete. Existing archive bytes can be

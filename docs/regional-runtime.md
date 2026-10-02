@@ -28,8 +28,11 @@ an honest 404. A matching graph that is not ready produces an unavailable state.
 One lightweight Python HTTP router listens on port 8002. Each accepted graph
 request launches the official `valhalla_service CONFIG ACTION JSON` actor with
 one regional config. A semaphore bounds native concurrency to two requests;
-each has an eight-second deadline and 768 MiB address-space limit. Graph-cache
-and search-label reservations are bounded in the generated config. Crashes and
+each has an eight-second deadline and a hard 768 MiB `RLIMIT_AS` address-space
+limit. The flat graph cache uses a **64 MiB soft target**, with LRU/hard eviction
+disabled; it may exceed that target during a request. Search-label reservations
+are reduced separately. Only the process limit provides the hard address-space
+ceiling, not the cache target. Crashes and
 timeouts terminate the isolated native process without contaminating another
 region; request completion releases its slot. Shutdown drains/terminates child
 process groups and reaps them. The OS may reuse file pages without a shared graph
@@ -67,16 +70,25 @@ streaming extraction, download resumption, durable migration and release gates.
 On macOS only, lifecycle tests bypass the Linux address-space wrapper because
 Darwin refuses lowering that limit; Linux CI runs the actual wrapper.
 
-The candidate-image gate downloads the original complete Canada archive, runs
-the structural validator, executes the pinned native binary under runtime limits,
-checks both historical city locates and real routes, and verifies that completed
-bytes cause no additional download. At the time of this document's update,
-**native container CI and production cutover are pending**. Local mocks and a
-matching image digest do not prove native ABI compatibility or deployed coverage.
+[Linux CI run 36983580857](https://github.com/WILLJBS/anipals-tiles/actions/runs/36983580857)
+for tiles commit `2799fcb` passed all 35 Linux tests and the real Valhalla 3.3.0
+candidate-image gate. It downloaded the original complete Canada archive, ran
+the structural validator and both historical city locates, executed final routes
+under runtime limits, and verified that completed graphs cause no extra download.
+The final routes were Toronto 0.362 km / 154 ms and Montreal 0.551 km / 165 ms.
 
-The first Linux candidate build and all tests passed, but the standalone
-`valhalla_service --version` probe exited because the pinned 3.3 CLI treats its
-first argument as a config filename. The 3.3 source confirms direct-request mode
-is supported; the gate now obtains the version through its native `status` action
-with a real regional config, before both regression routes. No image from the
-failed gate was published or deployed.
+The diagnostic matrix isolated Montreal's SIGSEGV to hard LRU eviction: both
+768 MiB and 4 GiB hard-LRU processes failed, whereas original, soft-LRU and
+flat-cache alternatives passed. Toronto passed all six configurations. See the
+[source and matrix review](native-cache-review.md); no crash backtrace was taken,
+so the suspected source-level use-after-free is not claimed as a confirmed stack.
+The preliminary `--version` CLI probe failure was also corrected by obtaining
+the native version via the supported `status` action with a regional config.
+
+The verified image digest is
+`sha256:68dd497fe2d837dda462c509dc84f9be19062189ba25f34d520546cbb89d329a`.
+Render's fixed-digest cutover has begun without changing service cost settings.
+**Production acceptance remains pending**: verify the deployed digest, complete
+migration of all 61 independent regional graphs and the 163-city scan. Passing
+Canada native CI does not establish that every region is installed or every
+production city route is healthy.

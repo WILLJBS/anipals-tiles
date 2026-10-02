@@ -1,22 +1,28 @@
 # Valhalla 3.3.0 native cache review — diagnostic evidence
 
-**Status: hypothesis under test; not a confirmed diagnosis.** The candidate CI
-binary reports 3.3.0 in approximately 101 ms, but an original complete Canada
-locate process exits with SIGSEGV (-11) after approximately 2.8 seconds. The
-regional structural walk passes; a local pyvalhalla 3.2 reader succeeded on the
-same graph. These facts do not establish that the 3.3 binary or graph is generally
-incompatible. Production has not been changed; the candidate publication gate
-remains blocked pending native diagnosis.
+**Status: native CI has isolated the Montreal crash to hard LRU eviction.**
+[Linux CI run 36983580857](https://github.com/WILLJBS/anipals-tiles/actions/runs/36983580857)
+for tiles commit `2799fcb` passed with the actual Valhalla 3.3.0 binary, 35 Linux
+tests, the complete original Canada graph and both final native routes. No gdb
+backtrace was captured: the configuration trigger is established, but the exact
+failing instruction and the pointer-lifetime mechanism below remain unconfirmed.
+Production digest cutover has begun separately; migration of all 61 regional
+graphs and the 163-city scan still require acceptance. CI success does not mean
+all production navigation is repaired.
 
-This review read five files from the official **3.3.0 tag**. It did not edit
-runtime configuration or execute an additional native request. Source copies
-are local under `/tmp/anipals-valhalla330-cache/` for comparison/backtraces.
+The original failure was a complete-Canada locate exiting with SIGSEGV (-11)
+after approximately 2.8 seconds, despite a passing structural walk and native
+status reporting 3.3.0. Five files from the official **3.3.0 tag** were reviewed;
+local source copies remain under `/tmp/anipals-valhalla330-cache/`.
 
 ## Cache semantics established by source
 
 [graphreader.cc, lines 436–477](https://github.com/valhalla/valhalla/blob/3.3.0/src/baldr/graphreader.cc#L436-L477)
 selects a flat cache by default: `use_lru_mem_cache` and hard control both default
-to false. The candidate overrides this to an LRU with a 64 MiB hard cap.
+to false. The failing candidate enabled LRU with a 64 MiB hard cap. The final
+configuration disables LRU and hard eviction, retaining the flat cache's 64 MiB
+**soft target**. This target is not a hard memory cap; each native process has a
+separate 768 MiB `RLIMIT_AS` address-space limit.
 
 [graphreader.cc, lines 321–330 and 339–348](https://github.com/valhalla/valhalla/blob/3.3.0/src/baldr/graphreader.cc#L321-L348)
 shows that hard mode evicts older entries during **every insertion** requiring
@@ -61,32 +67,34 @@ By contrast,
 retains a separate local tile owner in `GetOpposingEdgeId`; that specific method
 should not be incorrectly cited as unconditionally losing the source tile.
 
-## Matrix and interpretation
+## Completed matrix and interpretation
 
-The pending CI matrix compares:
+The same original graph bytes were tested under six configurations:
 
-| Tile-cache/config policy | Process address-space ceiling |
-|---|---|
-| Original generated config, regional root only | 4 GiB |
-| Original generated config, regional root only | 768 MiB |
-| Candidate overrides including hard LRU 64 MiB | 4 GiB |
-| Candidate overrides including hard LRU 64 MiB | 768 MiB |
+| Config policy | Address-space ceiling | Montreal | Toronto |
+|---|---|---|---|
+| Original generated config, regional root only | 4 GiB | exit 0; about 159 MB RSS | exit 0 |
+| Original generated config, regional root only | 768 MiB | exit 0; about 159 MB RSS | exit 0 |
+| Candidate hard LRU, 64 MiB | 4 GiB | SIGSEGV (-11); about 214 MB RSS / 233 MB VM | exit 0 |
+| Candidate hard LRU, 64 MiB | 768 MiB | SIGSEGV (-11); about 214 MB RSS / 233 MB VM | exit 0 |
+| Candidate with soft LRU instead of hard | 768 MiB | exit 0; about 163 ms | exit 0 |
+| Candidate changing only `use_lru_mem_cache` to false | 768 MiB | exit 0; about 163 ms | exit 0 |
 
-Capture bounded stderr, exit status, elapsed time and peak RSS. RSS and virtual
-address-space use are different measures; the limit is `RLIMIT_AS`. The status
-command does not open the same tiles and cannot establish route-memory safety.
+The two final comparisons retain the other candidate overrides and isolate hard
+LRU eviction as the failing policy. Raising the address-space ceiling does not
+repair the hard-LRU variant; both alternatives succeed under 768 MiB. This rules
+out the 768 MiB ceiling as the explanation for this reproduced failure. RSS and
+virtual address space remain different measurements; these observed samples do
+not establish an upper bound for arbitrary routes.
 
-If the original 768 MiB variant succeeds and the candidate 4 GiB variant crashes,
-that excludes a simple 768 MiB address-space explanation and implicates the
-**configuration overrides as a group**. It does not yet isolate the LRU switch:
-the candidate also changes connectivity/actions and search reservations. Add an
-adaptive fifth variant that keeps all candidate overrides but disables LRU, or
-capture a native backtrace in the suspected reach loop. A comparison changing
-only hard-vs-soft LRU can further distinguish eviction during a request from the
-cache data structure itself. If all variants fail, investigate other common
-inputs/binary behavior without presenting LRU as established root cause.
+Toronto succeeds in all six variants, so the earlier neighboring-tile size
+observation is supporting risk evidence, not a reproduction of Toronto failure.
+The successful soft-LRU result is consistent with the source-level lifetime
+hypothesis, but does not identify the actual failing frame without a backtrace.
 
-Even if disabling hard eviction resolves the crash, retain independent process
-concurrency/deadline/address-space limits. Cache settings are not a substitute
-for a proven whole-process memory bound. Native routes must pass before any
-immutable image is eligible for production promotion.
+The final flat-cache configuration passed native routes: Toronto **0.362 km in
+154 ms**, Montreal **0.551 km in 165 ms**. The tested published image digest is
+`sha256:68dd497fe2d837dda462c509dc84f9be19062189ba25f34d520546cbb89d329a`.
+Native concurrency, deadline and 768 MiB address-space limits remain in force;
+64 MiB is only the flat-cache soft target. Production verification must still
+confirm the exact digest, independent graph migration and the full city scan.
