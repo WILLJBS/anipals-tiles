@@ -9,7 +9,7 @@ activation and legacy migration are described in
 Production now pins the verified image digest; Canada and US South are confirmed
 installed. API `68fa5da` is live and web/play `68fa` is READY. Migration of all 61
 regions and the 163-city scan remain incomplete. The new lease-based retired-graph
-GC candidate `3588b1a` passes 46 local tests and awaits native CI/deployment;
+GC candidate `c68d169` passes 49 local tests and awaits native CI/deployment;
 it is not part of the live image.
 
 The current legacy release is approximately 87.46 GB. The previous 31 GB estimate

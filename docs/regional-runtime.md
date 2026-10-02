@@ -56,7 +56,7 @@ journal authorizes moving/removing the legacy mixed graph; a restart must regain
 native health before continuing deletion. Disk checks account for remaining
 archive bytes plus extraction and reserve, without a third concatenated tar.
 
-## Retired graph lifecycle — candidate `3588b1a`, awaiting CI/deployment
+## Retired graph lifecycle — candidate `c68d169`, awaiting CI/deployment
 
 The live image described below does not yet include the new GC implementation.
 Local `regional_gc.py` serializes activation per region and durably journals the
@@ -72,7 +72,9 @@ graphs remain queued. An eligible graph is atomically renamed to a deletion
 tombstone before removal, allowing interrupted deletion to resume. The boot
 supervisor retries collection every 30 seconds, in addition to materializer
 collection points. Old versions are reclaimable after their readers finish;
-this is not an indefinite rollback archive.
+this is not an indefinite rollback archive. If a catalog read races with retirement,
+it retries once only after proving that the active fingerprint changed. Missing or
+corrupt current graphs still fail explicitly; large deletions never block catalog reads.
 
 These lifecycle changes still require CI, deployment and operational acceptance.
 Until then, do not assume old regional versions are automatically reclaimed in
@@ -110,5 +112,5 @@ installed; API `68fa5da` is live and web/play `68fa` is READY. **Full migration 
 coverage acceptance remain pending**: all 61 independent graphs must finish
 migration and the 163-city scan must classify the 149 coordinates within extract
 envelopes and 14 outside. Envelope membership does not itself prove a route.
-The GC candidate `3588b1a` passes all 46 local tests and is awaiting Linux native
-CI/deployment. It is not included in this live image or its 35-test CI result.
+The GC and catalog candidate `c68d169` passes all 49 local tests and is awaiting
+Linux native CI/deployment. It is not included in this live image or its 35-test CI result.
