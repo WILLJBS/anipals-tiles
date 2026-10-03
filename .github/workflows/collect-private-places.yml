@@ -1,0 +1,61 @@
+name: collect-private-places-pilot
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed runner commit; dispatch matching ref
+        required: true
+      bucket:
+        description: Authorized private R2 bucket
+        required: true
+      spec_key:
+        description: Exact private content-addressed collector spec key
+        required: true
+      spec_sha:
+        description: Reviewed collector spec SHA256
+        required: true
+      spec_bytes:
+        description: Exact collector spec byte length
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: private-place-collector
+  cancel-in-progress: false
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Match reviewed dispatch and checkout
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fixed runtime dependencies
+        run: python -m pip install --disable-pip-version-check -r tools/storage-requirements.txt duckdb==1.4.5
+      - name: Offline checkpoint and budget guards
+        run: python -m unittest discover -s tests -p 'test_cloud_collector.py'
+      - name: Collect exact private pilot and persist private checkpoint
+        env:
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ inputs.bucket }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SPEC_KEY: ${{ inputs.spec_key }}
+          SPEC_SHA: ${{ inputs.spec_sha }}
+          SPEC_BYTES: ${{ inputs.spec_bytes }}
+        run: |
+          python tools/cloud_collect_places.py --source-sha "$SOURCE_SHA" \
+            --spec-key "$SPEC_KEY" --spec-sha "$SPEC_SHA" --spec-bytes "$SPEC_BYTES"
+# Private source/code/checkpoints/results never become Actions artifacts.

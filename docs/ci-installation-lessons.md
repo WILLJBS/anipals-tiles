@@ -53,3 +53,29 @@ do not execute Debian maintainer scripts. Completion still requires an actual
 replacement Linux image build to pass the prior tzdata point and finish its native
 verification gate. The already-running old workflow does not inherit this fix;
 the operator must terminate or replace that run with the reviewed new commit.
+
+## Incident: system SDK rejected conditional object writes
+
+The operator inspected failed run `37152951656`: the real HTTP PUT regression in
+`test_storage_transport` failed before sending a request with `ParamValidationError:
+Unknown parameter IfNoneMatch`. The trace loaded botocore from Ubuntu's
+`/usr/lib/python3/dist-packages`. The same test passed in the publication venv
+with boto3/botocore 1.42.97. The cause was CI dependency drift, not a reason to
+remove the immutable-write precondition or skip the HTTP assertion.
+
+`tools/storage-requirements.txt` is now the sole executable SDK-version source,
+pinning boto3 and botocore together. Each full-suite CI job prepares Python 3.12
+and installs this file before tests. Migration, display transfer, private archive
+verification and collection use the same requirements; collection also retains
+its own DuckDB pin. The requirements file is included in candidate-image workflow
+change triggers, so a SDK-model change cannot silently evade validation.
+
+`test_ci_storage_policy.py` checks ordering separately for each job, rejects
+inline SDK pins/overrides, wrong interpreter versions, installs after tests and
+missing or mismatched service-model pins. It also checks the actually installed
+versions and requires `IfNoneMatch` in both PutObject and CompleteMultipartUpload
+models. Negative controls reproduce the original system-SDK setup and ordering
+drift. The production Docker SDK is unchanged: runtime performs private reads,
+while conditional publication lives in the separately prepared CI environment.
+A new Linux CI run is still required; an already-running job does not inherit
+these workflow changes.

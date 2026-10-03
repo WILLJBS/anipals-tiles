@@ -35,5 +35,13 @@ Release assets allow the service to fetch graphs without application credentials
   It never silently moves a production `latest` tag.
 - `.github/workflows/publish-ready.yml`: explicit validated draft-release rescue.
 
-Run local safety tests with
-`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v`.
+Run local safety tests in an isolated environment with the reviewed storage SDK:
+
+```sh
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r tools/storage-requirements.txt
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
+```
+
+The SDK service model must support conditional object writes. Ubuntu's system
+SDK is not a substitute; the tests intentionally reject version/model drift.

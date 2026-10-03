@@ -48,7 +48,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install migration client
-        run: python3 -m pip install --disable-pip-version-check 'boto3==1.42.97'
+        run: python3 -m pip install --disable-pip-version-check -r tools/storage-requirements.txt
       - name: Validate migration code and all local contracts
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
       - id: source
@@ -90,7 +90,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install migration client
-        run: python3 -m pip install --disable-pip-version-check 'boto3==1.42.97'
+        run: python3 -m pip install --disable-pip-version-check -r tools/storage-requirements.txt
       - name: Revalidate exact source and read back the private pilot
         env:
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}

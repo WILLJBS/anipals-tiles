@@ -44,10 +44,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install fixed transfer dependency
+        run: python -m pip install --disable-pip-version-check -r tools/storage-requirements.txt
       - name: Offline failure and integrity regressions
         run: python -m unittest discover -s tests -p 'test_private_archive.py'
-      - name: Install fixed transfer dependency
-        run: python -m pip install --disable-pip-version-check boto3==1.42.97
       - name: Complete private GET verification and receipt publication
         env:
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
