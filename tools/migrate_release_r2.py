@@ -97,4 +97,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as error:
+        print(json.dumps(dict(event='tile_migration_failed', code=type(error).__name__)), file=sys.stderr)
+        raise SystemExit(1) from None
