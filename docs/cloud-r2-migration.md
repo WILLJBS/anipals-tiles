@@ -10,9 +10,12 @@ separate source-archive namespace.
 
 The workflow must be registered on the default branch and run at a reviewed
 revision. Inputs are the exact 40-character `source_sha`, `release_tag`, authorized
-`bucket`, `mode` (`pilot` or `full`), and an exact `pilot_region` slug. Defaults
+`bucket`, `contract`, `mode` (`pilot` or `full`), and an exact `pilot_region` slug. Defaults
 select the original release and Canada; another original region can be chosen.
-Only the original complete 61-region roster is accepted by this workflow.
+Select `contract=original61` (default), `gap3`, or `additions129`. The release
+must contain the complete registered roster and READY; a partial draft is
+rejected. For `gap3`, select `pilot_region=central-america`. See
+[migration contracts](migration-contracts.md) for the exact SHA bindings.
 
 Before dispatch, an authorized operator must configure these three encrypted
 repository secrets through GitHub Settings → Secrets and variables → Actions:
@@ -40,7 +43,7 @@ tile against its source/ABI/cross-references, and fully GET-verifies twenty R2
 objects. Only then does it upload its receipt to private R2 and GET-verify that
 receipt. In `pilot` mode no full migration jobs run.
 
-In `full` mode, the successful pilot supplies the exact 61-region matrix. At
+In `full` mode, the successful pilot supplies the exact registered regional matrix. At
 most four regions run concurrently, retaining one authenticated shard and one
 tile per runner. Each region rereads and revalidates source metadata, downloads
 the pilot receipt by immutable SHA/size, and checks its schema, bucket and count.
@@ -59,7 +62,7 @@ Both CLI entrypoints print a structured failure code instead of raw exception
 details. Logs contain no credential values, signed URLs or endpoint identifiers.
 An interrupted run may leave verified unreferenced tiles. Retrying GET-verifies
 and reuses them; it does not overwrite immutable keys. A full run is complete
-only when all 61 migration jobs and private receipts succeed. Production
+only when every region in the selected contract and every private receipt succeeds. Production
 activation and real target routes remain separate acceptance steps.
 
 ## Local source reuse evidence

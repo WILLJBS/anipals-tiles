@@ -18,15 +18,18 @@ from migration_transport import connection
 from regional_storage import atomic_json
 from migration_r2 import Publisher
 from migration_stream import inventory, migrate
+from migration_contract import load_profile, source_contract, validate_profile_supply, migration_identity
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release-json', required=True)
     parser.add_argument('--ready', required=True)
-    parser.add_argument('--roster', default=str(ROOT / 'deploy/regions.json'))
-    parser.add_argument('--coverage', default=str(ROOT / 'deploy/coverage.json'))
-    parser.add_argument('--image', default=str(ROOT / 'deploy/valhalla-image.txt'))
+    parser.add_argument('--contract', help='Registered cloud contract; requires exact --source-sha')
+    parser.add_argument('--source-sha')
+    parser.add_argument('--roster')
+    parser.add_argument('--coverage')
+    parser.add_argument('--image')
     parser.add_argument('--region', required=True, help='Exact slug, or all in full mode')
     parser.add_argument('--mode', choices=('pilot', 'full'), default='pilot')
     parser.add_argument('--work', required=True, help='Private ignored workspace; never repository source')
@@ -34,25 +37,36 @@ def main():
     args = parser.parse_args()
     work = Path(args.work).resolve(); work.mkdir(parents=True, exist_ok=True)
     release = json.loads(Path(args.release_json).read_text())
-    roster = json.loads(Path(args.roster).read_text())
-    coverage = json.loads(Path(args.coverage).read_text())
-    image = Path(args.image).read_text().strip()
     ready_bytes = Path(args.ready).read_bytes()
-    validate_supply(release, ready_bytes, roster, image, coverage)
+    registered = None
+    if args.contract:
+        if any((args.roster, args.coverage, args.image)):
+            parser.error('registered contract cannot override individual source inputs')
+        profile = load_profile(args.contract)
+        registered = source_contract(profile, args.source_sha)
+        roster, coverage, image = (profile[key] for key in ('roster', 'coverage', 'image'))
+        plans = validate_profile_supply(profile, release, ready_bytes)
+    else:
+        if args.source_sha:
+            parser.error('--source-sha requires a registered --contract')
+        roster = json.loads(Path(args.roster or ROOT/'deploy/regions.json').read_text())
+        coverage = json.loads(Path(args.coverage or ROOT/'deploy/coverage.json').read_text())
+        image = Path(args.image or ROOT/'deploy/valhalla-image.txt').read_text().strip()
+        validate_supply(release, ready_bytes, roster, image, coverage)
+        plans = build_plans(release, roster, image)
     ready = json.loads(ready_bytes) if ready_bytes != b'ok\n' else {}
-    plans = build_plans(release, roster, image)
     selected = plans if args.region == 'all' else [p for p in plans if p['slug'] == args.region]
     if not selected or args.mode == 'pilot' and len(selected) != 1:
         parser.error('pilot requires one exact region; full accepts one region or all')
     client, bucket = connection()
     publisher = Publisher(client, bucket)
-    contract = canonical_hash(dict(release=release['tag_name'], image=image,
-        coverage_sha256=canonical_hash(coverage), regions={p['slug']: p['fingerprint'] for p in plans}))
+    contract = migration_identity(release, image, coverage, plans, registered)
     if args.mode == 'full':
         if not args.pilot_receipt:
             parser.error('full migration requires --pilot-receipt')
         receipt = json.loads(Path(args.pilot_receipt).read_text())
-        if receipt.get('contract') != contract or receipt.get('bucket') != bucket or receipt.get('verified_tiles') != 20:
+        if (receipt.get('schema') != 1 or receipt.get('manifest_published') is not False
+                or receipt.get('contract') != contract or receipt.get('bucket') != bucket or receipt.get('verified_tiles') != 20):
             raise ValueError('pilot receipt differs from release contract/bucket or did not verify 20 tiles')
     features = {f['properties']['slug']: f for f in coverage['features']}
     for plan in selected:
@@ -60,6 +74,9 @@ def main():
         print(json.dumps(dict(event='region_inventory_started', region=slug)), flush=True)
         tiles, headers = inventory(plan, work)
         graph = canonical_hash({path: item['sha256'] for path, item in tiles.items()})
+        expected_graph = ready.get('region_manifests', {}).get(slug, {}).get('graph_fingerprint')
+        if expected_graph is not None and graph != expected_graph:
+            raise ValueError('validated source inventory differs from READY graph fingerprint')
         prefix = 'navigation/graphs/%s/%s/' % (slug, graph)
         def upload(relative, path, item):
             publisher.put(prefix + 'tiles/' + relative, path, item)
@@ -70,7 +87,8 @@ def main():
                 raise ValueError('pilot region has fewer than 20 validated tiles; choose a larger region')
             output = work / 'pilot-receipt.json'
             atomic_json(output, dict(schema=1, contract=contract, bucket=bucket, region=slug,
-                graph_fingerprint=graph, verified_tiles=result['tiles'], manifest_published=False))
+                graph_fingerprint=graph, verified_tiles=result['tiles'], manifest_published=False,
+                **({'registered_source': registered} if registered is not None else {})))
             print(json.dumps(dict(event='pilot_verified', region=slug, tiles=20)), flush=True)
             continue
         manifest = dict(schema=1, slug=slug, image=image, graph_fingerprint=graph,
@@ -90,7 +108,8 @@ def main():
         publisher.put(prefix + 'manifests/' + item['sha256'] + '.json', target, item)
         atomic_json(work / ('receipt-' + slug + '.json'), dict(schema=1, contract=contract,
             slug=slug, graph_fingerprint=graph, manifest_sha256=item['sha256'], manifest_size=item['size'],
-            feature=features[slug], tiles=result['tiles'], bucket=bucket))
+            feature=features[slug], tiles=result['tiles'], bucket=bucket,
+            **({'registered_source': registered} if registered is not None else {})))
         print(json.dumps(dict(event='region_objects_verified', region=slug, tiles=result['tiles'],
             uploaded=publisher.uploaded-before_upload, reused=publisher.reused-before_reuse,
             manifest_sha256=item['sha256'])), flush=True)

@@ -13,10 +13,9 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'deploy'))
-from regional_download import build_plans
-from regional_release import validate_supply
 from migration_transport import connection
 from migration_r2 import Publisher
+from migration_contract import load_profile, source_contract, source_revision, validate_profile_supply
 
 API = 'https://api.github.com/repos/WILLJBS/anipals-tiles'
 TAG = re.compile(r'tiles-[a-zA-Z0-9.-]{1,100}')
@@ -26,14 +25,6 @@ SHA = re.compile(r'[0-9a-f]{64}')
 class NoMetadataRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, newurl):
         raise ValueError('authenticated metadata redirect refused')
-
-
-def source_revision(value):
-    if not re.fullmatch(r'[0-9a-f]{40}', value):
-        raise ValueError('exact reviewed source SHA required')
-    actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    if actual != value:
-        raise ValueError('checkout differs from reviewed source SHA')
 
 
 def fetch(url, token=None, limit=16*1024*1024):
@@ -58,7 +49,7 @@ def fetch(url, token=None, limit=16*1024*1024):
             time.sleep(2)
 
 
-def prepare(tag, work):
+def prepare(tag, work, contract_name='original61', source_sha=None):
     if not TAG.fullmatch(tag):
         raise ValueError('explicit release tag required')
     token = os.environ.get('GH_TOKEN')
@@ -81,16 +72,14 @@ def prepare(tag, work):
     if marker['browser_download_url'] != expected:
         raise ValueError('READY URL differs from exact source release')
     ready = fetch(expected, limit=4*1024*1024)
-    roster = json.loads((ROOT/'deploy/regions.json').read_text())
-    coverage = json.loads((ROOT/'deploy/coverage.json').read_text())
-    image = (ROOT/'deploy/valhalla-image.txt').read_text().strip()
-    validate_supply(release, ready, roster, image, coverage)
-    plans = build_plans(release, roster, image)
-    if len(plans) != 61 or len({plan['slug'] for plan in plans}) != 61:
-        raise ValueError('this workflow requires exactly the original 61 regions')
+    profile = load_profile(contract_name)
+    plans = validate_profile_supply(profile, release, ready)
+    bound = source_contract(profile, source_sha) if source_sha is not None else None
     work.mkdir(parents=True, exist_ok=True)
     (work/'release.json').write_text(json.dumps(release))
     (work/'READY').write_bytes(ready)
+    if bound is not None:
+        (work/'source-contract.json').write_text(json.dumps(bound, sort_keys=True))
     return [plan['slug'] for plan in plans]
 
 
@@ -158,6 +147,7 @@ def outputs(values):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-sha', required=True)
+    parser.add_argument('--contract', default='original61')
     parser.add_argument('--tag', required=True)
     parser.add_argument('--work', type=Path, required=True)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -169,7 +159,7 @@ def main():
     args = parser.parse_args()
     source_revision(args.source_sha)
     if args.command == 'prepare':
-        regions = prepare(args.tag, args.work)
+        regions = prepare(args.tag, args.work, args.contract, args.source_sha)
         outputs(dict(regions=regions)); print(json.dumps(dict(validated_regions=len(regions))))
     elif args.command == 'publish-receipt':
         result = publish_receipt(args.source_sha, args.tag, args.file, args.name)

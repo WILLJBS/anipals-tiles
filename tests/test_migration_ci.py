@@ -27,7 +27,7 @@ class MigrationCiTests(unittest.TestCase):
             if url.endswith('&page=2'): return json.dumps([marker]).encode()
             return b'ok\n'
         with tempfile.TemporaryDirectory() as folder, patch.object(ci, 'fetch', side_effect=fetch), \
-                patch.object(ci, 'validate_supply') as gate, patch.object(ci, 'build_plans', return_value=[dict(slug='region-'+str(i)) for i in range(61)]):
+                patch('migration_contract.validate_supply') as gate, patch('migration_contract.build_plans', return_value=[dict(slug='region-'+str(i), parts=[]) for i in range(61)]):
             self.assertEqual(len(ci.prepare(tag, Path(folder))), 61)
             self.assertEqual(len(gate.call_args.args[0]['assets']), 101)
             self.assertTrue(any('page=2' in url for url in calls))

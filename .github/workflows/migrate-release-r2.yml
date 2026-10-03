@@ -6,20 +6,25 @@ on:
       source_sha:
         description: 'Exact reviewed commit SHA'
         required: true
+      contract:
+        description: 'Reviewed complete graph supply contract'
+        type: choice
+        options: [original61, gap3, additions129]
+        default: original61
       release_tag:
-        description: 'Exact existing complete 61-region release'
+        description: 'Exact READY release matching the selected contract'
         required: true
         default: 'tiles-20260929-26'
       bucket:
         description: 'Authorized private R2 destination bucket'
         required: true
       mode:
-        description: 'Pilot only, or pilot followed by all 61 regions'
+        description: 'Pilot only, or pilot followed by the complete registered roster'
         type: choice
         options: [pilot, full]
         default: pilot
       pilot_region:
-        description: 'Exact existing region slug for the mandatory twenty-tile pilot'
+        description: 'Pilot slug in this contract; gap3 uses central-america'
         required: true
         default: 'north-america-canada'
 permissions:
@@ -31,6 +36,7 @@ env:
   R2_BUCKET: ${{ inputs.bucket }}
   SOURCE_SHA: ${{ inputs.source_sha }}
   RELEASE_TAG: ${{ inputs.release_tag }}
+  MIGRATION_CONTRACT: ${{ inputs.contract }}
   GH_TOKEN: ${{ github.token }}
 jobs:
   pilot:
@@ -53,21 +59,21 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
       - id: source
         name: Pin exact complete release with all asset pages
-        run: python3 tools/migration_ci.py --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" prepare
+        run: python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" prepare
       - name: Verify twenty actual tiles in private R2
         env:
           PILOT_REGION: ${{ inputs.pilot_region }}
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: python3 -u tools/migrate_release_r2.py --release-json "$RUNNER_TEMP/migration/release.json" --ready "$RUNNER_TEMP/migration/READY" --region "$PILOT_REGION" --mode pilot --work "$RUNNER_TEMP/migration/objects"
+        run: python3 -u tools/migrate_release_r2.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --release-json "$RUNNER_TEMP/migration/release.json" --ready "$RUNNER_TEMP/migration/READY" --region "$PILOT_REGION" --mode pilot --work "$RUNNER_TEMP/migration/objects"
       - id: receipt
         name: Retain pilot receipt only in private R2
         env:
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: python3 tools/migration_ci.py --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" publish-receipt --name pilot --file "$RUNNER_TEMP/migration/objects/pilot-receipt.json"
+        run: python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" publish-receipt --name pilot --file "$RUNNER_TEMP/migration/objects/pilot-receipt.json"
   migrate:
     if: inputs.mode == 'full'
     needs: pilot
@@ -97,17 +103,17 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          python3 tools/migration_ci.py --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" prepare
-          python3 tools/migration_ci.py --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" fetch-pilot --sha256 "$PILOT_SHA" --size "$PILOT_SIZE"
+          python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" prepare
+          python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" fetch-pilot --sha256 "$PILOT_SHA" --size "$PILOT_SIZE"
       - name: Stream one isolated region through structural and R2 GET gates
         env:
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: python3 -u tools/migrate_release_r2.py --release-json "$RUNNER_TEMP/migration/release.json" --ready "$RUNNER_TEMP/migration/READY" --region "$REGION" --mode full --work "$RUNNER_TEMP/migration/objects" --pilot-receipt "$RUNNER_TEMP/migration/pilot-receipt.json"
+        run: python3 -u tools/migrate_release_r2.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --release-json "$RUNNER_TEMP/migration/release.json" --ready "$RUNNER_TEMP/migration/READY" --region "$REGION" --mode full --work "$RUNNER_TEMP/migration/objects" --pilot-receipt "$RUNNER_TEMP/migration/pilot-receipt.json"
       - name: Retain full region receipt only in private R2
         env:
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: python3 tools/migration_ci.py --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" publish-receipt --name "receipt-$REGION" --file "$RUNNER_TEMP/migration/objects/receipt-$REGION.json"
+        run: python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" publish-receipt --name "receipt-$REGION" --file "$RUNNER_TEMP/migration/objects/receipt-$REGION.json"
