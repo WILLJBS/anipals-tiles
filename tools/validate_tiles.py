@@ -76,44 +76,50 @@ def validate(root):
         if h['graph'] in tiles:
             raise ValueError('duplicate graphid')
         tiles[h['graph']] = (path, h)
+    headers = {graph: value[1] for graph, value in tiles.items()}
+    missing = sum(validate_tile(path, h, headers) for path, h in tiles.values())
+    return dict(validator='gph-v3-index-v1', tiles=len(tiles), external_references=missing,
+                tile_hashes={str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths})
+
+
+def validate_tile(path, h, headers):
+    """Validate one tile using the complete immutable regional header inventory."""
     missing = 0
 
     def ref(value, kind):
         nonlocal missing
         graph = value & MASK46
-        tile = tiles.get(graph & TILE_MASK)
+        tile = headers.get(graph & TILE_MASK)
         if tile is None:
             missing += 1
-        elif graph >> 25 >= tile[1][kind]:
+        elif graph >> 25 >= tile[kind]:
             raise ValueError('%s index %d out of bounds %d in tile %d' %
-                             (kind, graph >> 25, tile[1][kind], graph & TILE_MASK))
+                             (kind, graph >> 25, tile[kind], graph & TILE_MASK))
 
-    for path, h in tiles.values():
-        try:
-            with path.open('rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as data:
-                for i in range(h['nodes']):
-                    w = u64(data, 272 + i * 32 + 8)
-                    start, count = w & MASK21, (w >> 21) & 127
-                    if start + count > h['edges']:
-                        raise ValueError('node %d edge span %d+%d exceeds %d' % (i, start, count, h['edges']))
-                    tr = u64(data, 272 + i * 32 + 16)
-                    if (tr & MASK21) + ((tr >> 21) & 7) > h['transitions']:
-                        raise ValueError('node transition span out of bounds')
-                    if ((w >> 28) & 4095) >= h_admin_count(data) and h_admin_count(data):
-                        raise ValueError('node admin index out of bounds')
-                for i in range(h['transitions']):
-                    ref(u64(data, 272 + h['nodes'] * 32 + i * 8), 'nodes')
-                for i in range(h['edges']):
-                    pos = h['edge_start'] + i * 48
-                    ref(u64(data, pos), 'nodes')
-                    if u64(data, pos + 8) & TILE_MASK >= h['edgeinfo_size']:
-                        raise ValueError('edge-info offset out of bounds')
-                for i in range(h['bins']):
-                    ref(u64(data, h['bin_start'] + i * 8), 'edges')
-        except (ValueError, struct.error) as error:
-            raise ValueError(str(path) + ': ' + str(error)) from error
-    return dict(validator='gph-v3-index-v1', tiles=len(tiles), external_references=missing,
-                tile_hashes={str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths})
+    try:
+        with path.open('rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as data:
+            for i in range(h['nodes']):
+                w = u64(data, 272 + i * 32 + 8)
+                start, count = w & MASK21, (w >> 21) & 127
+                if start + count > h['edges']:
+                    raise ValueError('node %d edge span %d+%d exceeds %d' % (i, start, count, h['edges']))
+                tr = u64(data, 272 + i * 32 + 16)
+                if (tr & MASK21) + ((tr >> 21) & 7) > h['transitions']:
+                    raise ValueError('node transition span out of bounds')
+                if ((w >> 28) & 4095) >= h_admin_count(data) and h_admin_count(data):
+                    raise ValueError('node admin index out of bounds')
+            for i in range(h['transitions']):
+                ref(u64(data, 272 + h['nodes'] * 32 + i * 8), 'nodes')
+            for i in range(h['edges']):
+                pos = h['edge_start'] + i * 48
+                ref(u64(data, pos), 'nodes')
+                if u64(data, pos + 8) & TILE_MASK >= h['edgeinfo_size']:
+                    raise ValueError('edge-info offset out of bounds')
+            for i in range(h['bins']):
+                ref(u64(data, h['bin_start'] + i * 8), 'edges')
+    except (ValueError, struct.error) as error:
+        raise ValueError(str(path) + ': ' + str(error)) from error
+    return missing
 
 
 def h_admin_count(data):

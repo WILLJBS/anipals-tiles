@@ -63,6 +63,7 @@ def build(index, roster, source_sha256):
 def validate(coverage, roster):
     expected = {r['slug']: r['region'] for r in roster['region']}
     features = coverage['features']
+    locks = {r['slug']: r.get('coverage_sha256') for r in roster['region']}
     if coverage.get('source') != SOURCE or len(features) != len(expected):
         raise ValueError('exact official coverage roster required')
     seen = set()
@@ -70,10 +71,28 @@ def validate(coverage, roster):
         props = feature['properties']; slug = props['slug']
         if slug in seen or slug not in expected or props['region'] != expected[slug]:
             raise ValueError('duplicate or mismatched coverage region')
+        if locks.get(slug) and locks[slug] != digest(feature):
+            raise ValueError('locked extraction coverage changed; regenerate reviewed source inputs')
         if props['pbf_url'] != 'https://download.geofabrik.de/' + expected[slug] + '-latest.osm.pbf':
             raise ValueError('coverage PBF differs from build PBF')
         if props['source_index_sha256'] != coverage['source_index_sha256'] or not re.fullmatch(r'[0-9a-f]{64}', props['source_index_sha256']):
             raise ValueError('coverage source digest mismatch')
+        snapshot = props.get('input_source')
+        if snapshot:
+            if (not isinstance(snapshot, dict) or type(snapshot.get('size')) is not int or snapshot['size'] <= 0
+                    or not re.fullmatch('[0-9a-f]{32}', snapshot.get('md5', ''))
+                    or not re.fullmatch(r'https://download\.geofabrik\.de/[a-z0-9/-]+-[0-9]{6}\.osm\.pbf', snapshot.get('url', ''))
+                    or re.sub(r'-[0-9]{6}\.osm\.pbf$', '-latest.osm.pbf', snapshot['url']) != props['pbf_url']
+                    or props.get('extraction') not in ('identity', 'complete_ways-window')
+                    or not re.fullmatch('[0-9a-f]{64}', props.get('source_geometry_sha256', ''))):
+                raise ValueError('invalid fixed snapshot/extraction declaration')
+        if props.get('native_probe_sha256') and (not re.fullmatch('[0-9a-f]{64}', props['native_probe_sha256'])
+                or type(props.get('native_probe_count')) is not int or props['native_probe_count'] <= 0
+                or not isinstance(props.get('native_source_rows'), list)
+                or len(props['native_source_rows']) != props['native_probe_count']
+                or len(set(props['native_source_rows'])) != props['native_probe_count']
+                or any(type(row) is not int or row < 0 for row in props['native_source_rows'])):
+            raise ValueError('invalid native source-row scope contract')
         geometry(feature['geometry']); seen.add(slug)
     return {f['properties']['slug']: f for f in features}
 

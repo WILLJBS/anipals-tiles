@@ -28,6 +28,47 @@ def parts(value):
     return result
 
 
+def validate_native_probes(manifest, feature, slug):
+    props = feature['properties']
+    if not props.get('native_probe_sha256'):
+        return
+    proof = manifest.get('native_validation', {})
+    probes = proof.get('probes', [])
+    if (proof.get('slug') != slug or proof.get('native_version') != '3.3.0'
+            or proof.get('scope_sha256') != props['native_probe_sha256']
+            or not isinstance(probes, list) or len(probes) != props['native_probe_count']):
+        raise ValueError('native scope proof differs from frozen coverage contract')
+    ids = set()
+    for result in probes:
+        row, length = result.get('source_row'), result.get('distance_km')
+        if (type(row) is not int or row in ids or result.get('verified') is not True
+                or type(length) not in (int, float) or not 0 < length < 5):
+            raise ValueError('missing, duplicate or invalid native source-row route')
+        ids.add(row)
+    if ids != set(props['native_source_rows']):
+        raise ValueError('native proof substituted source-row identities')
+
+
+def validate_snapshot(manifest, feature, slug):
+    """One publication/runtime gate for fixed PBF and technical-window provenance."""
+    props = feature['properties']
+    snapshot = props.get('input_source')
+    if not snapshot:
+        return
+    proof = manifest.get('input_provenance', {})
+    source, output = proof.get('source', {}), proof.get('output', {})
+    if (source.get('slug') != slug or source.get('source_url') != snapshot['url']
+            or source.get('size') != snapshot['size'] or source.get('md5') != snapshot['md5']
+            or not sha(source.get('sha256')) or not sha(output.get('sha256'))
+            or type(output.get('size')) is not int or output['size'] <= 0
+            or proof.get('extraction') != props['extraction']):
+        raise ValueError('missing pinned snapshot/extraction provenance')
+    if proof['extraction'] == 'complete_ways-window' and (
+            proof.get('clip_geometry_sha256') != canonical_hash(feature['geometry'])
+            or proof.get('way_references_checked') is not True):
+        raise ValueError('custom extraction geometry/reference gate missing')
+
+
 def validate_supply(release, ready_bytes, roster, image, coverage):
     """Return None only for exact asset bytes and a supported supply contract.
 
@@ -63,6 +104,7 @@ def validate_supply(release, ready_bytes, roster, image, coverage):
     if ready.get('coverage_sha256') != canonical_hash(coverage):
         raise ValueError('READY coverage digest mismatch')
     expected = {row['slug']: row['region'] for row in roster['region']}
+    coverage_locks = {row['slug']: row.get('coverage_sha256') for row in roster['region']}
     if ready.get('regions') != sorted(expected):
         raise ValueError('READY region roster mismatch')
     features = {f['properties']['slug']: f for f in coverage['features']}
@@ -75,6 +117,10 @@ def validate_supply(release, ready_bytes, roster, image, coverage):
     for plan in plans:
         slug = plan['slug']; manifest = regional[slug]; feature = features[slug]
         props = feature['properties']
+        if coverage_locks.get(slug) and coverage_locks[slug] != canonical_hash(feature):
+            raise ValueError('locked extraction coverage changed')
+        validate_snapshot(manifest, feature, slug)
+        validate_native_probes(manifest, feature, slug)
         if props.get('region') != expected[slug] or props.get('pbf_url') != 'https://download.geofabrik.de/' + expected[slug] + '-latest.osm.pbf':
             raise ValueError('coverage PBF/region mismatch')
         if not isinstance(manifest, dict) or not sha(manifest.get('graph_fingerprint')):

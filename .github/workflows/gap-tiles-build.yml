@@ -1,0 +1,115 @@
+name: global-gap-tiles-build
+# Three new independent graphs; never overlays or replaces the existing 61 roots.
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact reviewed source SHA including gap inputs'
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: global-gap-tiles-build
+  cancel-in-progress: false
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      matrix: ${{ steps.release.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+      - name: Validate exact source and coverage
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          python3 tools/coverage.py --roster deploy/global-gap-regions.json --output deploy/global-gap-coverage.json
+          python3 tools/check_global_build.py
+          python3 -m unittest discover -s tests -v
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="tiles-global-gaps-$(date -u +%Y%m%d)-${{ github.run_number }}"
+          gh release create "$TAG" --draft --title "$TAG" --notes 'Three isolated OSM-derived graphs for 122 assigned source rows. ODbL. Technical windows are not administrative boundaries.'
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          python3 -c 'import json,os; s=json.load(open("deploy/global-gap-sources.json")); print("matrix="+json.dumps({"include":[{"slug":r["slug"],"url":r["input_source"]["url"]} for r in s["builds"]]}),file=open(os.environ["GITHUB_OUTPUT"],"a"))'
+  build:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    env:
+      SLUG: ${{ matrix.slug }}
+      SOURCE_URL: ${{ matrix.url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+      - name: Pin real source SHA and extract declared scope
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool
+          osmium --version
+          python3 -m unittest discover -s tests -p test_gap_sources.py -v
+          curl -fLsS --retry 3 --retry-delay 2 "$SOURCE_URL" -o source.osm.pbf
+          python3 tools/gap_source.py pin --slug "$SLUG" --pbf source.osm.pbf --lock source-lock.json
+          SELECTED=$(python3 tools/gap_source.py extract --slug "$SLUG" --pbf source.osm.pbf --lock source-lock.json --output extracted.osm.pbf --provenance input-provenance.json)
+          osmium tags-filter "$SELECTED" -o filtered.osm.pbf w/highway w/route=ferry r/boundary=administrative
+          rm -f source.osm.pbf extracted.osm.pbf
+      - name: Build isolated graph and pass native routes at every assigned city
+        run: |
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 6G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          IMAGE=$(python3 -c "from tools.release_manifest import image; print(image('deploy/valhalla-image.txt'))")
+          mkdir tiles
+          docker run --rm -v "$PWD:/data" "$IMAGE" valhalla_build_config --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 1 > valhalla_config.json
+          docker run --rm -v "$PWD:/data" "$IMAGE" bash -c 'set -e; valhalla_build_admins -c /data/valhalla_config.json /data/filtered.osm.pbf; valhalla_build_tiles -c /data/valhalla_config.json /data/filtered.osm.pbf'
+          python3 tools/validate_tiles.py tiles > tile-validation.json
+          docker run --rm -v "$PWD:/data" -w /data -e SLUG "$IMAGE" bash -c 'set -e; apt-get update -qq; apt-get install -y -qq python3; python3 tests/native_scope_smoke.py --slug "$SLUG"'
+          sudo rm -f filtered.osm.pbf
+          tar -cf - tiles | split -d -b 1900M - "tiles-$SLUG.tar-"
+          python3 tools/release_manifest.py --roster deploy/global-gap-regions.json --coverage deploy/global-gap-coverage.json region --provenance input-provenance.json --native-validation native-probes.json "$SLUG" tile-validation.json tiles-"$SLUG".tar-* > "manifest-$SLUG.json"
+      - name: Upload validated region and evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: gh release upload "$TAG" tiles-"$SLUG".tar-* "manifest-$SLUG.json" --clobber
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gap-build-${{ matrix.slug }}
+          path: |
+            source-lock.json
+            input-provenance.json
+            native-probes.json
+            tile-validation.json
+  ready:
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+      - name: Publish only complete three-graph supply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          gh release download "$TAG" --pattern 'manifest-*.json' --dir manifests
+          RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == "'"$TAG"'") | .id')
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > release-assets.json
+          python3 tools/release_manifest.py --roster deploy/global-gap-regions.json --coverage deploy/global-gap-coverage.json ready release-assets.json manifests/*.json > READY
+          mkdir release-input
+          cp deploy/global-gap-coverage.json release-input/coverage.json
+          gh release upload "$TAG" READY release-input/coverage.json
+          gh release edit "$TAG" --draft=false

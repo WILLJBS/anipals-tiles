@@ -41,6 +41,8 @@ class Router:
         if not candidates:
             raise EngineError('no single extract covers both locations', 404)
         regions = self.catalog.available()
+        # A broad remote extract must not delay an already installed country graph.
+        candidates.sort(key=lambda slug: (regions.get(slug, {}).get('storage') == 'r2', slug))
         missing = any(slug not in regions for slug in candidates)
         failure = EngineError('regional graph is downloading')
         unavailable = None

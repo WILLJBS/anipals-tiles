@@ -4,7 +4,7 @@ import re
 from urllib.parse import urlsplit
 
 
-def reader(environ=None):
+def connection(environ=None):
     from boto3 import client
     from botocore.config import Config
     from botocore.exceptions import BotoCoreError, ClientError
@@ -24,6 +24,13 @@ def reader(environ=None):
                 aws_secret_access_key=env['R2_SECRET_ACCESS_KEY'],
                 config=Config(signature_version='s3v4', connect_timeout=2,
                               read_timeout=3, retries={'total_max_attempts': 3, 'mode': 'standard'}))
+
+    return s3, bucket
+
+
+def reader(environ=None):
+    from botocore.exceptions import BotoCoreError, ClientError
+    s3, bucket = connection(environ)
 
     def fetch(key):
         response = None

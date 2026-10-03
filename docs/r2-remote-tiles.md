@@ -97,29 +97,29 @@ it does not rebuild PBFS or download the other 60 regions.
 
 ## Global coverage review and remaining cloud gates
 
-The initial 140-extract expansion proposal contained five aggregate cases.
-The deterministic `tools/global_coverage_plan.py` now prefers actual granular
-extracts and preserves hashes of all three input files: cities, official index,
-and existing coverage. Its reviewed run produces **138 new extracts, 19 rows
-requiring custom extracts, 4,980 existing-polygon rows, and zero rows outside all
-official polygons**, from the 6,222 source rows. This is planning, not routing
-acceptance. The initial aggregate cases were:
+The initial 140-extract proposal was audited into 138 granular official
+extracts and 19 residual source rows. The final executable plan coalesces nine
+Central America children into its shared parent: **129 ordinary additions
+(1,120 rows), three shared/window graphs (122 rows), and the existing 61 graphs
+(4,980 rows)**. All 6,222 source rows have one explicit owner in committed
+`deploy/global-additions-scopes.json`. The Central America native scope contains
+120 rows; Port-aux-Français and Grytviken each require one route probe. This is
+build planning, not proof that those cities currently route successfully.
 
-| Proposed aggregate | Missing source coordinates assigned | Required review |
-| --- | ---: | --- |
-| South America | Grytviken | Avoid rebuilding a continent for one settlement |
-| Australia/Oceania | Port-aux-Français | Check roads and an explicitly bounded island extract |
-| Central America | 17 Caribbean island settlements | Preserve separate island graphs or one audited Caribbean extract |
-| Alps | Vaduz | Resolved to official `liechtenstein` |
-| Britain and Ireland | Jersey, Guernsey, Isle of Man | Resolved to official `guernsey-jersey` and `isle-of-man` |
+The shared Central America polygon is the unchanged official extract. The other
+two use declared technical extraction windows within pinned parent sources,
+not administrative island boundaries or whole-archipelago claims. All new graph
+features bind their exact native probe SHA and source-row IDs; native proof is
+required by the common regional manifest/READY/runtime supply gate. See
+[global-gap-builds.md](global-gap-builds.md) and
+[release-r2-migration.md](release-r2-migration.md) for generation and dispatch.
 
-Country labels cannot substitute for polygons; for example boundary overlap can
-assign an Iraqi source city to Iran's extract. A final roster must record actual
-geometry and provenance, and test both route endpoints against one graph.
-Custom extracts require explicit source PBF digest, clipping polygon and native
-validation; a city bounding box is not an audited coverage polygon. The 6,222
-source rows also include unresolved city identity duplicates and very small
-settlements, so that number is not itself a validated distinct-city count.
+Country labels cannot substitute for polygons; both route endpoints must fit
+one isolated graph. The 6,222 source rows also include duplicate identities and
+small settlements, so that number is not a validated distinct-city count.
+`tools/check_global_build.py` checks every committed scope without depending on
+ignored local planning files. Local graph candidates remain ahead of overlapping
+remote graphs, and independent graph tile files are never overlaid.
 
 Existing 61 graph bytes should be reused without rebuilding. Their old exact
 coverage features must remain bound to their graph provenance; refreshing the

@@ -9,10 +9,21 @@ name: valhalla-tiles-build
 on:
   workflow_dispatch:
     inputs:
+      roster_file:
+        description: 'Reviewed repository roster JSON; defaults to unchanged local regions'
+        required: false
+        default: 'deploy/regions.json'
+      coverage_file:
+        description: 'Exact coverage JSON matching the reviewed roster'
+        required: false
+        default: 'deploy/coverage.json'
       countries:
         description: 'Space-separated Geofabrik ids for subset rerun; empty = default set'
         required: false
         default: ''
+env:
+  REGION_ROSTER_FILE: ${{ github.event.inputs.roster_file || 'deploy/regions.json' }}
+  REGION_COVERAGE_FILE: ${{ github.event.inputs.coverage_file || 'deploy/coverage.json' }}
 permissions:
   contents: write
 concurrency:
@@ -29,7 +40,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate exact official coverage
-        run: python3 tools/coverage.py
+        run: |
+          [[ "$REGION_ROSTER_FILE" =~ ^deploy/[a-z0-9-]+\.json$ ]]
+          [[ "$REGION_COVERAGE_FILE" =~ ^deploy/[a-z0-9-]+\.json$ ]]
+          python3 tools/coverage.py --roster "$REGION_ROSTER_FILE" --output "$REGION_COVERAGE_FILE"
+          python3 tools/check_global_build.py
       - id: set
         env:
           WANT: ${{ github.event.inputs.countries }}
@@ -72,6 +87,8 @@ jobs:
           sudo rm -f raw.osm.pbf
           ls -lh filtered.osm.pbf | tee -a calib.txt
       - name: Build Valhalla tiles
+        env:
+          BUILD_SLUG: ${{ matrix.region.slug }}
         run: |
           # runners are reused VMs: a previous job's swapfile may still be
           # swapped on (fallocate then fails with "Text file busy") — reset first
@@ -103,12 +120,19 @@ jobs:
           # The strict road-tile ABI/index check below covers every .gph independently.
           python3 tools/validate_tiles.py tiles > tile-validation.json
           jq 'del(.tile_hashes)' tile-validation.json | tee -a calib.txt
+          SCOPE_FILE=$(python3 -c 'import json,os; print(json.load(open(os.environ["REGION_ROSTER_FILE"])).get("native_scopes_file", ""))')
+          NATIVE_FLAGS=()
+          if [ -n "$SCOPE_FILE" ]; then
+            [[ "$SCOPE_FILE" =~ ^deploy/[a-z0-9-]+\.json$ ]]
+            docker run --rm -v "$PWD:/data" -w /data -e SCOPE_FILE="$SCOPE_FILE" -e REGION_COVERAGE_FILE -e BUILD_SLUG "$VALHALLA_IMAGE" bash -c 'set -e; apt-get update -qq; apt-get install -y -qq python3; python3 tests/native_scope_smoke.py --slug "$BUILD_SLUG" --spec "$SCOPE_FILE" --coverage "$REGION_COVERAGE_FILE"'
+            NATIVE_FLAGS=(--native-validation native-probes.json)
+          fi
           # free disk BEFORE tar: pbf+filtered can be 12 GB (US), and tar needs
           # a tiles-sized copy — both at once exceeded the 14 GB runner disk
           sudo rm -rf raw.osm.pbf filtered.osm.pbf build.log
           # stream straight to <=1.9 GB parts (no full-size tar on disk)
           tar -cf - tiles | split -d -b 1900M - "tiles-${{ matrix.region.slug }}.tar-"
-          python3 tools/release_manifest.py region "${{ matrix.region.slug }}" tile-validation.json tiles-${{ matrix.region.slug }}.tar-* > manifest-${{ matrix.region.slug }}.json
+          python3 tools/release_manifest.py --roster "$REGION_ROSTER_FILE" --coverage "$REGION_COVERAGE_FILE" region "${NATIVE_FLAGS[@]}" "$BUILD_SLUG" tile-validation.json tiles-${{ matrix.region.slug }}.tar-* > manifest-${{ matrix.region.slug }}.json
           sudo rm -rf tiles
           ls -lh tiles-*.tar-* | tee -a calib.txt
           df -h / | tail -1 | tee -a calib.txt
@@ -118,6 +142,14 @@ jobs:
         run: |
           gh release upload "${{ needs.setup.outputs.tag }}" tiles-${{ matrix.region.slug }}.tar-* manifest-${{ matrix.region.slug }}.json --clobber --repo "$GITHUB_REPOSITORY"
           echo "uploaded: ${{ matrix.region.slug }}" | tee -a calib.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: region-gates-${{ matrix.region.slug }}
+          path: |
+            native-probes.json
+            tile-validation.json
+            calib.txt
   final:
     runs-on: ubuntu-latest
     needs: [setup, build]
@@ -137,7 +169,9 @@ jobs:
           # Validate exact roster, provenance, per-region inventory and part hashes before READY.
           RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == "'"$TAG"'") | .id')
           gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > release-assets.json
-          python3 tools/release_manifest.py ready release-assets.json manifests/*.json > READY
-          gh release upload "$TAG" READY deploy/coverage.json --clobber --repo "$GITHUB_REPOSITORY"
+          python3 tools/release_manifest.py --roster "$REGION_ROSTER_FILE" --coverage "$REGION_COVERAGE_FILE" ready release-assets.json manifests/*.json > READY
+          mkdir -p release-input
+          cp "$REGION_COVERAGE_FILE" release-input/coverage.json
+          gh release upload "$TAG" READY release-input/coverage.json --clobber --repo "$GITHUB_REPOSITORY"
           gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
           echo "release published: $TAG"

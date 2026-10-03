@@ -237,6 +237,24 @@ class RouterTests(unittest.TestCase):
             router=Router(Catalog(root,shape),Native(),probes)
             self.assertTrue(router.verify('north-america-canada','c'*64)['verified'])
 
+    def test_ready_local_country_precedes_overlapping_remote_aggregate(self):
+        with tempfile.TemporaryDirectory() as root:
+            install(root, 'a', 'a'*64, active=True)
+            install(root, 'b', 'b'*64, active=True)
+            class Sources(Catalog):
+                def available(self):
+                    regions = super().available()
+                    regions['a']['storage'] = 'r2'
+                    return regions
+            calls = []
+            class Native:
+                def request(self, region, *args, **kwargs):
+                    calls.append(region['slug'])
+                    return dict(trip=dict(legs=[{}], summary=dict(length=.2)))
+            router = Router(Sources(root, coverage()), Native(), [])
+            router.route(dict(locations=[dict(lat=5,lon=9),dict(lat=6,lon=9)],costing='pedestrian'))
+            self.assertEqual(calls, ['b'])
+
     def test_later_no_route_does_not_hide_candidate_storage_outage(self):
         with tempfile.TemporaryDirectory() as root:
             install(root, 'a', 'a'*64, active=True)

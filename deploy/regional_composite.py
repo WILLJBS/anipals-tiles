@@ -129,6 +129,6 @@ def load_composite(fetch, digest, base_coverage, image, cache_root):
         if (not isinstance(slug, str) or not SLUG.fullmatch(slug) or not sha(fp)
                 or not sha(digest) or type(size) is not int or not 0 < size <= 32 * 1024 * 1024):
             raise ValueError('invalid remote manifest reference')
-        key = 'navigation/graphs/%s/%s/manifest.json' % (slug, fp)
+        key = 'navigation/graphs/%s/%s/manifests/%s.json' % (slug, fp, digest)
         manifests[slug] = cached_object(cache_root, fetch, key, digest, 32 * 1024 * 1024, size)
     return Composite(raw, hashlib.sha256(raw).hexdigest(), base_coverage, image, manifests)

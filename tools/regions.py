@@ -3,7 +3,7 @@ import json
 import os
 import sys
 from pathlib import Path
-roster = json.loads(Path('deploy/regions.json').read_text())['region']
+roster = json.loads(Path(os.environ.get('REGION_ROSTER_FILE', 'deploy/regions.json')).read_text())['region']
 wanted = sys.argv[1].split()
 if wanted:
     allowed = {r['region']: r for r in roster}
