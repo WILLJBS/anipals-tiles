@@ -11,7 +11,7 @@ ENV ANIPALS_REVISION=${REVISION}
 # check) and curl (release download). Without them the container died ~47 s
 # after start on Render (2026-09-30).
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-      python3 curl ca-certificates \
+      python3 python3-boto3 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY deploy/download-part.sh deploy/release-plan.py deploy/install-tiles.py /usr/local/bin/
@@ -19,8 +19,10 @@ COPY deploy/regions.json /usr/local/share/anipals-regions.json
 COPY deploy/valhalla-image.txt /usr/local/share/anipals-valhalla-image.txt
 COPY deploy/entrypoint.sh /usr/local/bin/anipals-entrypoint.sh
 COPY deploy/regional_*.py tools/validate_tiles.py /usr/local/lib/anipals/
+COPY tools/coverage.py /usr/local/lib/anipals/regional_coverage.py
 COPY tests/native_smoke.py /usr/local/lib/anipals/native_smoke.py
 COPY tests/native_diagnose.py /usr/local/lib/anipals/native_diagnose.py
+COPY tests/native_remote_smoke.py /usr/local/lib/anipals/native_remote_smoke.py
 COPY deploy/coverage.json /usr/local/share/anipals-coverage.json
 COPY deploy/probes.json /usr/local/share/anipals-probes.json
 COPY deploy/tile-release.txt /usr/local/share/anipals-tile-release.txt

@@ -23,8 +23,9 @@ class EngineError(Exception):
 
 
 class Engine:
-    def __init__(self, template, runtime, concurrency=2, timeout=8, memory_mb=768):
+    def __init__(self, template, runtime, concurrency=2, timeout=8, memory_mb=768, bridge=None):
         self.template = template
+        self.bridge = bridge
         self.runtime = Path(runtime)
         self.runtime.mkdir(parents=True, exist_ok=True)
         self.slots = threading.BoundedSemaphore(concurrency)
@@ -33,13 +34,14 @@ class Engine:
         self.children = set()
         self.closed = False
 
-    def config(self, region):
-        path = self.runtime / (region['fingerprint'] + '.json')
+    def config(self, region, remote=None):
+        path = self.runtime / ((remote[0] if remote else region['fingerprint']) + '.json')
         with self.lock:
             if not path.exists():
                 config = json.loads(json.dumps(self.template))
                 m = config['mjolnir']
-                m.update(tile_dir=region['tile_dir'], tile_extract='', traffic_extract='',
+                m.update(tile_dir='' if remote else region['tile_dir'], tile_extract='', traffic_extract='',
+                         tile_url=remote[1] if remote else '', tile_url_gz=False,
                          max_cache_size=64 * 1024 * 1024, use_lru_mem_cache=False,
                          lru_mem_cache_hard_control=False)
                 config['loki']['use_connectivity'] = False
@@ -59,6 +61,8 @@ class Engine:
             raise EngineError('native request capacity exhausted')
         child = None
         lease = None
+        remote = None
+        config = None
         started = time.monotonic()
         try:
             graph_root = Path(region['tile_dir']).parent
@@ -77,7 +81,14 @@ class Engine:
             identity = json.loads(marker.read_text())
             if identity.get('fingerprint') != region['fingerprint'] or identity.get('slug') != region['slug']:
                 raise EngineError('graph identity changed before request')
-            config = self.config(region)
+            if region.get('storage') == 'r2':
+                if self.bridge is None:
+                    raise EngineError('remote graph transport unavailable')
+                try:
+                    remote = self.bridge.begin(region)
+                except (ValueError, KeyError) as error:
+                    raise EngineError('remote graph is not in trusted release') from error
+            config = self.config(region, remote)
             command = [sys.executable, str(Path(__file__).with_name('regional_native.py')),
                        str(self.memory_mb), str(config), action, json.dumps(payload)]
             with self.lock:
@@ -93,6 +104,8 @@ class Engine:
                 os.killpg(child.pid, signal.SIGKILL)
                 child.communicate()
                 raise EngineError('native request deadline exceeded')
+            if remote and self.bridge.failed(remote[0]):
+                raise EngineError('remote graph object retrieval failed')
             if child.returncode:
                 # Coordinates and full native request/output never enter logs.
                 print(json.dumps({'event': 'native_failure', 'region': region['slug'],
@@ -113,6 +126,10 @@ class Engine:
                               'action': action, 'ms': round((time.monotonic()-started)*1000)}), flush=True)
             return result
         finally:
+            if remote:
+                self.bridge.end(remote[0])
+                if config is not None:
+                    config.unlink(missing_ok=True)
             # Do not explicitly LOCK_UN: the inherited native descriptor keeps
             # the lease even if the Python router dies before its child exits.
             if lease is not None:

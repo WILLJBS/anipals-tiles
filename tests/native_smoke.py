@@ -65,6 +65,10 @@ def main():
                 assert time.monotonic() - started < 8
                 print(json.dumps(dict(probe=name, distance_km=distance,
                       elapsed_ms=round((time.monotonic()-started)*1000), fingerprint=region['fingerprint'])), flush=True)
+            from native_remote_smoke import remote_smoke
+            from regional_release import canonical_hash
+            remote_smoke(region, json.loads(engine.config(region).read_text()), plan['image'],
+                         canonical_hash(catalog.features[region['slug']]), root)
             assert router.status()['ready'] is True
             # Reuse completed bytes with zero downloader calls; no 416 after restart.
             def forbidden(*unused):

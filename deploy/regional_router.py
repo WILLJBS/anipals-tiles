@@ -43,6 +43,7 @@ class Router:
         regions = self.catalog.available()
         missing = any(slug not in regions for slug in candidates)
         failure = EngineError('regional graph is downloading')
+        unavailable = None
         deadline = time.monotonic() + 8
         for slug in candidates:
             region = regions.get(slug)
@@ -69,9 +70,11 @@ class Router:
                 return result, region
             except EngineError as error:
                 failure = error
+                if error.status >= 500:
+                    unavailable = error
         if missing:
             raise EngineError('candidate regional graph is downloading')
-        raise failure
+        raise unavailable or failure
 
     def verify(self, slug, fingerprint):
         region = self.catalog.candidate(slug, fingerprint)
@@ -90,7 +93,10 @@ class Router:
                 raise EngineError('invalid native probe response')
             if not result[0].get('edges'):
                 raise EngineError('native probe found no edges', 404)
-        if slug == 'north-america-canada':
+        if region.get('storage') == 'r2':
+            for sample in region['probes']:
+                check(sample)
+        elif slug == 'north-america-canada':
             if len(samples) != 2 or {p['slug'] for p in samples} != {'toronto', 'montreal'}:
                 raise EngineError('required regression probes missing')
             for sample in samples:
@@ -176,9 +182,18 @@ def main():
     parser.add_argument('--config', default='/tmp/anipals-config.json')
     parser.add_argument('--port', type=int, default=8002)
     args = parser.parse_args()
-    engine = Engine(json.loads(Path(args.config).read_text()), '/tmp/anipals-native')
-    router = Router(Catalog(args.data_root, json.loads(Path(args.coverage).read_text())),
+    coverage = json.loads(Path(args.coverage).read_text())
+    remote = None
+    if os.environ.get('ANIPALS_REMOTE_INDEX_SHA256'):
+        from regional_remote_runtime import RemoteRuntime
+        remote = RemoteRuntime(args.data_root, coverage)
+        coverage = remote.composite.coverage
+    engine = Engine(json.loads(Path(args.config).read_text()), '/tmp/anipals-native',
+                    bridge=remote.bridge if remote else None)
+    router = Router(Catalog(args.data_root, coverage),
                     engine, json.loads(Path(args.probes).read_text()))
+    if remote:
+        remote.start(router)
     server = http.server.ThreadingHTTPServer(('0.0.0.0', args.port), Handler)
     server.router = router
     def stop(*unused):
@@ -192,6 +207,8 @@ def main():
     finally:
         engine.close()
         server.server_close()
+        if remote:
+            remote.close()
 
 
 if __name__ == '__main__':

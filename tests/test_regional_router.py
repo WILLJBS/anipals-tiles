@@ -237,6 +237,19 @@ class RouterTests(unittest.TestCase):
             router=Router(Catalog(root,shape),Native(),probes)
             self.assertTrue(router.verify('north-america-canada','c'*64)['verified'])
 
+    def test_later_no_route_does_not_hide_candidate_storage_outage(self):
+        with tempfile.TemporaryDirectory() as root:
+            install(root, 'a', 'a'*64, active=True)
+            install(root, 'b', 'b'*64, active=True)
+            class Native:
+                def request(self, region, *args, **kwargs):
+                    raise EngineError('storage unavailable' if region['slug'] == 'a' else 'no route',
+                                      503 if region['slug'] == 'a' else 404)
+            router = Router(Catalog(root, coverage()), Native(), [])
+            with self.assertRaises(EngineError) as error:
+                router.route(dict(locations=[dict(lat=5,lon=9),dict(lat=6,lon=9)],costing='pedestrian'))
+            self.assertEqual(error.exception.status, 503)
+
     def test_overlap_retries_candidate_without_ever_combining_graph_roots(self):
         with tempfile.TemporaryDirectory() as root:
             install(root,'a','a'*64,active=True);install(root,'b','b'*64,active=True)

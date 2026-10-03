@@ -1,0 +1,36 @@
+name: remote-tiles-diagnostic
+# Explicit read-only supply diagnostic; no image push and no production deploy.
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact reviewed 40-character source SHA'
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: remote-tiles-diagnostic
+  cancel-in-progress: false
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate reviewed source
+        env:
+          SHA: ${{ inputs.source_sha }}
+        run: '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+      - name: Local runtime and release tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+      - name: Build exact candidate without publishing
+        run: |
+          docker build -f deploy/Dockerfile \
+            --build-arg VALHALLA_IMAGE="$(cat deploy/valhalla-image.txt)" \
+            --build-arg REVISION="${{ inputs.source_sha }}" \
+            -t anipals-remote-diagnostic .
+      - name: Actual native local and remote cold/hot routes
+        # native_smoke selects only Canada from the existing immutable release.
+        # It does not download the other 60 regions or rebuild any PBF.
+        run: docker run --rm --entrypoint python3 anipals-remote-diagnostic /usr/local/lib/anipals/native_smoke.py
