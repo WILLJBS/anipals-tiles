@@ -6,10 +6,14 @@ for tiles commit `2799fcb` passed with the actual Valhalla 3.3.0 binary, 35 Linu
 tests, the complete original Canada graph and both final native routes. No gdb
 backtrace was captured: the configuration trigger is established, but the exact
 failing instruction and the pointer-lifetime mechanism below remain unconfirmed.
-Production now pins that verified image; Canada and US South are confirmed
-installed. Migration of all 61 regional graphs and the 163-city scan still
-require acceptance. CI success and these installed regions do not establish
-that all production navigation is repaired.
+The current production image is the subsequent `c68d169` build, verified by
+[CI 36986181555](https://github.com/WILLJBS/anipals-tiles/actions/runs/36986181555) with 49 Linux tests and
+native Canada routes. It includes GC leases and catalog race handling. After the
+08:54 UTC restart, completed graphs reverified without RESET/re-download. All
+61 regions subsequently installed with no observed native failure or extra router
+restart through acceptance. Routes passed in all 149 covered cities: 148 registered
+centers plus a reviewed Dubai park; 14 existing coverage gaps remain. Dubai's
+original center correctly fails the game's reviewed-place distance gate.
 
 The original failure was a complete-Canada locate exiting with SIGSEGV (-11)
 after approximately 2.8 seconds, despite a passing structural walk and native
@@ -93,11 +97,14 @@ observation is supporting risk evidence, not a reproduction of Toronto failure.
 The successful soft-LRU result is consistent with the source-level lifetime
 hypothesis, but does not identify the actual failing frame without a backtrace.
 
-The final flat-cache configuration passed native routes: Toronto **0.362 km in
-154 ms**, Montreal **0.551 km in 165 ms**. The tested published image digest is
-`sha256:68dd497fe2d837dda462c509dc84f9be19062189ba25f34d520546cbb89d329a`.
+The current flat-cache build `c68d16915e266193539595923b1a186b61277c8e`
+passed final native routes: Toronto **0.362 km in 175 ms**, Montreal **0.551 km in
+191 ms**. Its exact tested and live image digest is
+`sha256:3428cba734d6cca4f03ed9eb36e2c2fb70ad304ba58b1b70986b0875dae77ac0`.
 Native concurrency, deadline and 768 MiB address-space limits remain in force;
-64 MiB is only the flat-cache soft target. The production digest is now pinned;
-remaining acceptance covers complete independent graph migration and the full
-city scan. Lease-based old-graph GC added afterward is still local code awaiting
-CI/deployment (`3588b1a`, 46 local tests passed) and is not covered by this image's native test evidence.
+64 MiB is only the flat-cache soft target. This image includes the later
+lease-based old-graph GC and catalog activation-race fixes. The intermediate
+`3588b1a` candidate was not promoted to production. Same-release restart
+reverification is observed; production deletion after a new release is not
+claimed. All-region migration and city-scan classification passed; uncovered
+regions remain a separate coverage task.

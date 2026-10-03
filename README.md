@@ -4,13 +4,17 @@ AniPals pedestrian navigation uses **61 isolated regional graphs**, selected by
 exact official Geofabrik coverage polygons. Independent extracts reuse GraphIds;
 they must never be overlaid. The regional runtime, bounded native process model,
 activation and legacy migration are described in
-[regional-runtime.md](docs/regional-runtime.md). [Linux CI](https://github.com/WILLJBS/anipals-tiles/actions/runs/36983580857) passed
-35 tests and real Valhalla 3.3.0 Canada routes with the final flat-cache policy.
-Production now pins the verified image digest; Canada and US South are confirmed
-installed. API `68fa5da` is live and web/play `68fa` is READY. Migration of all 61
-regions and the 163-city scan remain incomplete. The new lease-based retired-graph
-GC candidate `c68d169` passes 49 local tests and awaits native CI/deployment;
-it is not part of the live image.
+[regional-runtime.md](docs/regional-runtime.md). [Linux CI](https://github.com/WILLJBS/anipals-tiles/actions/runs/36986181555)
+for `c68d169` passed 49 tests and real Valhalla 3.3.0 Canada routes. Production
+pins that tested image, including graph leases, retired-graph GC and catalog
+activation-race handling. After the 2026-10-02 08:54 UTC deployment restart,
+completed graphs were reverified without RESET or re-downloading. All **61/61
+regions** completed migration with no observed native failure. The 163-city scan
+and follow-up repairs verified routes in all **149 covered cities**: 148 registered
+centers plus a reviewed Dubai park (its center fails the game place-distance gate).
+The **14 existing coverage gaps** remain separate. API `fa38cfd` is live and
+web/play at that commit are READY. The 2026-10-03 closeout check confirmed the
+same live image, API readiness and a real Toronto route.
 
 The current legacy release is approximately 87.46 GB. The previous 31 GB estimate
 and shared tile-directory runtime are obsolete. Existing archive bytes can be

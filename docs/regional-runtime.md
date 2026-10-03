@@ -56,10 +56,9 @@ journal authorizes moving/removing the legacy mixed graph; a restart must regain
 native health before continuing deletion. Disk checks account for remaining
 archive bytes plus extraction and reserve, without a third concatenated tar.
 
-## Retired graph lifecycle — candidate `c68d169`, awaiting CI/deployment
+## Retired graph lifecycle — included in the live image
 
-The live image described below does not yet include the new GC implementation.
-Local `regional_gc.py` serializes activation per region and durably journals the
+`regional_gc.py` in the live image serializes activation per region and durably journals the
 previous active fingerprint in `retired.json` **before** switching `active.json`.
 GC considers only these explicitly retired graphs, rechecks that each is no
 longer active, and does not infer deletion permission from directory age, disk
@@ -76,9 +75,11 @@ this is not an indefinite rollback archive. If a catalog read races with retirem
 it retries once only after proving that the active fingerprint changed. Missing or
 corrupt current graphs still fail explicitly; large deletions never block catalog reads.
 
-These lifecycle changes still require CI, deployment and operational acceptance.
-Until then, do not assume old regional versions are automatically reclaimed in
-production. The existing mixed-root migration is a separate one-time cleanup.
+Implementation, Linux CI and deployment of these lifecycle changes have passed.
+Real-process tests verify the lease and deletion boundaries. Production still
+uses the same release: no new-release retirement/deletion is claimed to have
+occurred there. All 61 regions completed migration and activation checks. The existing
+mixed-root migration is a separate one-time cleanup.
 See also the [release and official coverage contract](regional-release-contract.md).
 
 ## Verification status
@@ -89,12 +90,13 @@ streaming extraction, download resumption, durable migration and release gates.
 On macOS only, lifecycle tests bypass the Linux address-space wrapper because
 Darwin refuses lowering that limit; Linux CI runs the actual wrapper.
 
-[Linux CI run 36983580857](https://github.com/WILLJBS/anipals-tiles/actions/runs/36983580857)
-for tiles commit `2799fcb` passed all 35 Linux tests and the real Valhalla 3.3.0
-candidate-image gate. It downloaded the original complete Canada archive, ran
-the structural validator and both historical city locates, executed final routes
-under runtime limits, and verified that completed graphs cause no extra download.
-The final routes were Toronto 0.362 km / 154 ms and Montreal 0.551 km / 165 ms.
+[Linux CI run 36986181555](https://github.com/WILLJBS/anipals-tiles/actions/runs/36986181555)
+for tiles commit `c68d16915e266193539595923b1a186b61277c8e` passed all 49 Linux
+tests and the real Valhalla 3.3.0 candidate-image gate. It downloaded the original
+complete Canada archive, ran the structural validator and both historical city
+locates, executed final routes under runtime limits, and verified that completed
+graphs cause no extra download. The final routes were Toronto 0.362 km / 175 ms
+and Montreal 0.551 km / 191 ms.
 
 The diagnostic matrix isolated Montreal's SIGSEGV to hard LRU eviction: both
 768 MiB and 4 GiB hard-LRU processes failed, whereas original, soft-LRU and
@@ -104,13 +106,27 @@ so the suspected source-level use-after-free is not claimed as a confirmed stack
 The preliminary `--version` CLI probe failure was also corrected by obtaining
 the native version via the supported `status` action with a regional config.
 
-The verified image digest is
-`sha256:68dd497fe2d837dda462c509dc84f9be19062189ba25f34d520546cbb89d329a`.
-Production now pins that exact image digest without a service-cost change.
-Canada (`north-america-canada`) and US South (`north-america-us-south`) are confirmed
-installed; API `68fa5da` is live and web/play `68fa` is READY. **Full migration and
-coverage acceptance remain pending**: all 61 independent graphs must finish
-migration and the 163-city scan must classify the 149 coordinates within extract
-envelopes and 14 outside. Envelope membership does not itself prove a route.
-The GC and catalog candidate `c68d169` passes all 49 local tests and is awaiting
-Linux native CI/deployment. It is not included in this live image or its 35-test CI result.
+Production pins the tested image digest
+`sha256:3428cba734d6cca4f03ed9eb36e2c2fb70ad304ba58b1b70986b0875dae77ac0`.
+It includes native graph leases, retired-graph GC and catalog handling for a read
+of an old activation pointer. At the 2026-10-02 08:54 UTC deployment restart,
+completed graphs were individually reverified and reported installed within tens
+of seconds, without RESET or downloading completed graphs again. The final
+checkpoint is **61/61 regions installed**, followed by `all graphs materialized`.
+No native failure or extra router restart was observed after that deployment
+through acceptance. API `fa38cfd` is live and web/play at that commit are READY.
+
+**Migration and city-scan acceptance passed.** All 163 registered centers were
+classified: 14 are outside official extract polygons; 148 covered centers now
+return actual routes after the app's city-alias relation repair. Dubai's center
+is outside the app's 2,500m reviewed-place gate, so its 404 is preserved and an
+approved park separately verifies the city with a 642m route. All 149 covered
+cities thus have a successful route; this does not mean every original center
+probe passed. The intermediate `3588b1a` candidate was not promoted to production.
+
+Same-OD graph-change/outage/recovery regression used actual read-only production
+city queries and controlled engine responses. It verified fresh routes, honest
+failure and released DB leases without disrupting production. The original scan,
+three repaired-center reprobes, Dubai venue probe and region install timestamps
+remain separately recorded. On 2026-10-03, closeout checks confirmed the same live
+image, API readiness and Toronto's 362m route; no new deployment was required.
