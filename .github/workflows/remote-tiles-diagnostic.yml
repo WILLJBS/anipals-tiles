@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   native:
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - name: Validate reviewed source
@@ -25,12 +26,14 @@ jobs:
       - name: Local runtime and release tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
       - name: Build exact candidate without publishing
+        timeout-minutes: 15
         run: |
           docker build -f deploy/Dockerfile \
             --build-arg VALHALLA_IMAGE="$(cat deploy/valhalla-image.txt)" \
             --build-arg REVISION="${{ inputs.source_sha }}" \
             -t anipals-remote-diagnostic .
       - name: Actual native local and remote cold/hot routes
+        timeout-minutes: 20
         # native_smoke selects only Canada from the existing immutable release.
         # It does not download the other 60 regions or rebuild any PBF.
         run: docker run --rm --entrypoint python3 anipals-remote-diagnostic /usr/local/lib/anipals/native_smoke.py

@@ -10,7 +10,8 @@ ENV ANIPALS_REVISION=${REVISION}
 # entrypoint dependencies the run image does not ship: python3 (READY-marker
 # check) and curl (release download). Without them the container died ~47 s
 # after start on Render (2026-09-30).
-RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+# Scope debconf/timezone settings to installation; do not persist them in ENV.
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y -qq --no-install-recommends \
       python3 python3-boto3 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

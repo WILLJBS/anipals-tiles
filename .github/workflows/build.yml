@@ -31,6 +31,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   setup:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
@@ -61,6 +62,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
   build:
+    timeout-minutes: 180
     runs-on: ubuntu-latest
     needs: setup
     strategy:
@@ -72,10 +74,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download and filter country pbf
+        timeout-minutes: 30
         run: |
           REGION="${{ matrix.region.region }}"
           echo "building region: $REGION" | tee calib.txt
-          sudo apt-get install -y -qq osmium-tool
+          sudo env DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y -qq osmium-tool
           # --retry-all-errors: Geofabrik serves 200-with-HTML sometimes; the
           # file-type check below is the real gate
           curl -sfL --retry 5 --retry-all-errors "https://download.geofabrik.de/${REGION}-latest.osm.pbf" -o raw.osm.pbf
@@ -106,7 +109,7 @@ jobs:
           set -o pipefail
           docker run --rm -v "$PWD:/data" "$VALHALLA_IMAGE" bash -c '
             set -e -o pipefail
-            apt-get update -qq && apt-get install -y -qq time >/dev/null
+            apt-get update -qq && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y -qq time >/dev/null
             echo "=== admins ==="
             /usr/bin/time -v valhalla_build_admins -c /data/valhalla_config.json /data/filtered.osm.pbf 2>&1 | tail -12
             echo "=== tiles ==="
@@ -124,7 +127,7 @@ jobs:
           NATIVE_FLAGS=()
           if [ -n "$SCOPE_FILE" ]; then
             [[ "$SCOPE_FILE" =~ ^deploy/[a-z0-9-]+\.json$ ]]
-            docker run --rm -v "$PWD:/data" -w /data -e SCOPE_FILE="$SCOPE_FILE" -e REGION_COVERAGE_FILE -e BUILD_SLUG "$VALHALLA_IMAGE" bash -c 'set -e; apt-get update -qq; apt-get install -y -qq python3; python3 tests/native_scope_smoke.py --slug "$BUILD_SLUG" --spec "$SCOPE_FILE" --coverage "$REGION_COVERAGE_FILE"'
+            docker run --rm -v "$PWD:/data" -w /data -e SCOPE_FILE="$SCOPE_FILE" -e REGION_COVERAGE_FILE -e BUILD_SLUG "$VALHALLA_IMAGE" bash -c 'set -e; apt-get update -qq; DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y -qq python3; python3 tests/native_scope_smoke.py --slug "$BUILD_SLUG" --spec "$SCOPE_FILE" --coverage "$REGION_COVERAGE_FILE"'
             NATIVE_FLAGS=(--native-validation native-probes.json)
           fi
           # free disk BEFORE tar: pbf+filtered can be 12 GB (US), and tar needs
@@ -151,6 +154,7 @@ jobs:
             tile-validation.json
             calib.txt
   final:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: [setup, build]
     if: needs.setup.outputs.production == 'true'

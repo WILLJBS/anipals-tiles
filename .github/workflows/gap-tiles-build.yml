@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   setup:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.release.outputs.tag }}
@@ -38,6 +39,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           python3 -c 'import json,os; s=json.load(open("deploy/global-gap-sources.json")); print("matrix="+json.dumps({"include":[{"slug":r["slug"],"url":r["input_source"]["url"]} for r in s["builds"]]}),file=open(os.environ["GITHUB_OUTPUT"],"a"))'
   build:
+    timeout-minutes: 180
     needs: setup
     runs-on: ubuntu-latest
     strategy:
@@ -52,9 +54,10 @@ jobs:
         with:
           ref: ${{ inputs.source_sha }}
       - name: Pin real source SHA and extract declared scope
+        timeout-minutes: 30
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq osmium-tool
+          sudo env DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y -qq osmium-tool
           osmium --version
           python3 -m unittest discover -s tests -p test_gap_sources.py -v
           curl -fLsS --retry 3 --retry-delay 2 "$SOURCE_URL" -o source.osm.pbf
@@ -75,7 +78,7 @@ jobs:
           docker run --rm -v "$PWD:/data" "$IMAGE" valhalla_build_config --mjolnir-tile-dir /data/tiles --mjolnir-concurrency 1 > valhalla_config.json
           docker run --rm -v "$PWD:/data" "$IMAGE" bash -c 'set -e; valhalla_build_admins -c /data/valhalla_config.json /data/filtered.osm.pbf; valhalla_build_tiles -c /data/valhalla_config.json /data/filtered.osm.pbf'
           python3 tools/validate_tiles.py tiles > tile-validation.json
-          docker run --rm -v "$PWD:/data" -w /data -e SLUG "$IMAGE" bash -c 'set -e; apt-get update -qq; apt-get install -y -qq python3; python3 tests/native_scope_smoke.py --slug "$SLUG"'
+          docker run --rm -v "$PWD:/data" -w /data -e SLUG "$IMAGE" bash -c 'set -e; apt-get update -qq; DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y -qq python3; python3 tests/native_scope_smoke.py --slug "$SLUG"'
           sudo rm -f filtered.osm.pbf
           tar -cf - tiles | split -d -b 1900M - "tiles-$SLUG.tar-"
           python3 tools/release_manifest.py --roster deploy/global-gap-regions.json --coverage deploy/global-gap-coverage.json region --provenance input-provenance.json --native-validation native-probes.json "$SLUG" tile-validation.json tiles-"$SLUG".tar-* > "manifest-$SLUG.json"
@@ -94,6 +97,7 @@ jobs:
             native-probes.json
             tile-validation.json
   ready:
+    timeout-minutes: 15
     needs: [setup, build]
     runs-on: ubuntu-latest
     steps:
