@@ -1,0 +1,47 @@
+name: display-basemap-publish
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact reviewed commit SHA'
+        required: true
+      bucket:
+        description: 'Authorized private R2 bucket'
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: display-basemap-official-publication
+  cancel-in-progress: false
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install bounded transfer dependency
+        run: python -m pip install --disable-pip-version-check boto3==1.42.97
+      - name: Offline transfer regression tests
+        run: python -m unittest discover -s tests -p 'test_display_archive.py'
+      - name: Stream fixed official archive and verify both ends
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET: ${{ inputs.bucket }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          python tools/display_archive.py \
+            --apply --source-sha "$SOURCE_SHA" --output .local/display-archive-receipt.json
+      - name: Preserve completion or incomplete checkpoint
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: display-archive-receipt
+          path: .local/display-archive-receipt.json
+          if-no-files-found: warn

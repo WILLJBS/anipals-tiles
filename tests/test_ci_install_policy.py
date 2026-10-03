@@ -4,6 +4,9 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+# Large official archive ingestion streams 86.75 GB plus a complete remote readback.
+# All ordinary jobs retain the stricter three-hour ceiling.
+JOB_TIMEOUT_LIMITS = {('display-basemap-publish.yml', 'archive'): 350}
 
 
 def install_errors(text):
@@ -54,7 +57,8 @@ class CiInstallPolicyTests(unittest.TestCase):
             for name, values in jobs:
                 with self.subTest(workflow=path.name, job=name):
                     self.assertEqual(len(values), 1)
-                    self.assertTrue(1 <= int(values[0]) <= 180)
+                    limit = JOB_TIMEOUT_LIMITS.get((path.name, name), 180)
+                    self.assertTrue(1 <= int(values[0]) <= limit)
 
 
 if __name__ == '__main__':
