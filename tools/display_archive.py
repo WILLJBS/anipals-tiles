@@ -17,11 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'deploy'))
 from regional_storage import atomic_json as save
 from regional_r2 import connection
+from storage_errors import error_details
 
 
 def conflict(error):
-    response = getattr(error, 'response', {})
-    return response.get('Error', {}).get('Code') in ('PreconditionFailed', 'ConditionalRequestConflict', '412', '409') or response.get('ResponseMetadata', {}).get('HTTPStatusCode') in (409, 412)
+    code, status = error_details(error)
+    return code in ('PreconditionFailed', 'ConditionalRequestConflict', '412', '409') or status in (409, 412)
 
 
 def cloud_connection():
@@ -90,7 +91,7 @@ def transfer(client, bucket, *, key=KEY, size=SIZE, sha256=SHA256, part_size=PAR
     try:
         existing = client.head_object(Bucket=bucket, Key=key)
     except Exception as error:
-        if getattr(error, 'response', {}).get('Error', {}).get('Code') not in ('404', 'NoSuchKey', 'NotFound'):
+        if error_details(error)[0] not in ('404', 'NoSuchKey', 'NotFound'):
             raise
         existing = None
     if existing is not None:
@@ -165,7 +166,7 @@ if __name__ == '__main__':
     except BaseException as error:
         if isinstance(error, SystemExit):
             raise
-        code = getattr(error, 'response', {}).get('Error', {}).get('Code')
+        code = error_details(error)[0]
         print(json.dumps({'error': code or type(error).__name__,
                           'reason': str(error) if isinstance(error, ValueError) else 'BASEMAP_TRANSFER_FAILED',
                           'multipart_abort_failed': bool(getattr(error, 'multipart_abort_failed', False))}), file=sys.stderr)

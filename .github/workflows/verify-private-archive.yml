@@ -1,0 +1,66 @@
+name: verify-private-archive
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed verifier commit SHA (dispatch the same ref)
+        required: true
+      bucket:
+        description: Authorized private R2 bucket
+        required: true
+      manifest_key:
+        description: Exact archive/staging/sha256 manifest key
+        required: true
+      manifest_sha:
+        description: Expected stage manifest SHA256
+        required: true
+      manifest_bytes:
+        description: Expected stage manifest byte length
+        required: true
+      total_bytes:
+        description: Exact reviewed source byte budget including duplicate references
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: private-archive-verification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Require exact reviewed workflow and checkout
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline failure and integrity regressions
+        run: python -m unittest discover -s tests -p 'test_private_archive.py'
+      - name: Install fixed transfer dependency
+        run: python -m pip install --disable-pip-version-check boto3==1.42.97
+      - name: Complete private GET verification and receipt publication
+        env:
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ inputs.bucket }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          MANIFEST_KEY: ${{ inputs.manifest_key }}
+          MANIFEST_SHA: ${{ inputs.manifest_sha }}
+          MANIFEST_BYTES: ${{ inputs.manifest_bytes }}
+          TOTAL_BYTES: ${{ inputs.total_bytes }}
+        run: |
+          python tools/private_archive_verify.py --source-sha "$SOURCE_SHA" \
+            --manifest-key "$MANIFEST_KEY" --manifest-sha "$MANIFEST_SHA" \
+            --manifest-bytes "$MANIFEST_BYTES" --total-bytes "$TOTAL_BYTES"
+# No artifact upload: both stage data and complete receipts remain private R2 objects.

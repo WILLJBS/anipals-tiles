@@ -71,3 +71,31 @@ keeping the same per-part SHA gate. The available Canada directory is unpacked
 graph data without its original tar; it cannot substitute for trusted archive
 bytes. The local cached pilot is twenty tiles only and does not start a second
 61-region migration alongside the cloud job.
+
+## Bulk transport and verified pilot (2026-10-03)
+
+The cached US Northeast pilot completed twenty actual conditional PUT/full GET
+SHA verifications without publishing a graph manifest. The original archive
+part digests, ABI checks and cross-tile inventory checks remained enabled.
+This is storage pipeline evidence, not a completed 61-region migration or
+production activation.
+
+Navigation migration and its receipt helper use a separate bulk connection:
+10-second connect and 90-second read timeout, at most three SDK attempts. The
+online regional reader retains 2-second connect and 3-second read timeouts and
+its existing actor deadline. Source download budgets are unchanged.
+
+A previous diagnostic wrapper masked a transport error with AttributeError:
+botocore transport exceptions can expose `response=None`, so chaining `.get`
+is unsafe. A subsequent unwrapped run identified the BotoCoreError handling
+branch; its precise underlying SDK subclass was not retained. Do not label
+that historical error as a proven ReadTimeoutError. The complete pilot then
+succeeded with the separate bulk budget. An offline real-SDK HTTP test also
+proves a delayed response raises ReadTimeoutError under the short budget and
+succeeds with the bulk budget.
+
+All tile, display and private-receipt publishers read SDK metadata through
+`storage_errors.error_details`. Missing or malformed metadata remains unknown
+and fails closed; it never authorizes object creation or conflict reuse.
+Only recognized protocol error codes may enter logs. A conflict still requires
+complete object GET/SHA validation. Transport failure is never treated as 404.

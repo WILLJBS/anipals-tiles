@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'deploy'))
 from regional_download import build_plans
 from regional_release import canonical_hash, validate_supply
-from regional_r2 import connection
+from migration_transport import connection
 from regional_storage import atomic_json
 from migration_r2 import Publisher
 from migration_stream import inventory, migrate

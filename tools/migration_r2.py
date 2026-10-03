@@ -1,5 +1,6 @@
 """Idempotent private object publication with complete GET SHA256 verification."""
 import hashlib
+from storage_errors import error_details
 
 
 class Publisher:
@@ -12,7 +13,7 @@ class Publisher:
         try:
             response = self.s3.get_object(Bucket=self.bucket, Key=key)
         except ClientError as error:
-            if error.response.get('Error', {}).get('Code') in ('NoSuchKey', '404'):
+            if error_details(error)[0] in ('NoSuchKey', '404'):
                 return False
             raise OSError('R2 verification read failed') from None
         except BotoCoreError:
@@ -42,8 +43,7 @@ class Publisher:
                 self.s3.put_object(Bucket=self.bucket, Key=key, Body=stream, ContentLength=item['size'],
                                    ContentType='application/octet-stream', Metadata={'sha256': item['sha256']}, IfNoneMatch='*')
         except ClientError as error:
-            code = error.response.get('Error', {}).get('Code')
-            status = error.response.get('ResponseMetadata', {}).get('HTTPStatusCode')
+            code, status = error_details(error)
             if code in ('PreconditionFailed', 'ConditionalRequestConflict', '412') or status in (409, 412):
                 if self.verify(key, item):
                     self.reused += 1

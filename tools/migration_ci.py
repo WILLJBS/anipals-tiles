@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'deploy'))
 from regional_download import build_plans
 from regional_release import validate_supply
-from regional_r2 import connection
+from migration_transport import connection
 from migration_r2 import Publisher
 
 API = 'https://api.github.com/repos/WILLJBS/anipals-tiles'
