@@ -31,7 +31,8 @@ class Router:
                         for s, r in regions.items() if (s, r['fingerprint']) in self.verified]
         return {'architecture': 'regional-v1', 'revision': os.environ.get('ANIPALS_REVISION', 'local'),
                 'release': self.catalog.fingerprint(regions), 'ready': bool(verified),
-                'complete': len(regions) == len(self.catalog.features),
+                'complete': set(regions) == set(self.catalog.features) and (not getattr(self, 'ownership_index', None) or len(verified) == len(regions)),
+                'ownership_index': getattr(self, 'ownership_index', None),
                 'region_count': len(regions), 'expected_regions': len(self.catalog.features),
                 'available_regions': sorted(regions), 'ready_regions': verified}
 
@@ -195,6 +196,7 @@ def main():
     router = Router(Catalog(args.data_root, coverage),
                     engine, json.loads(Path(args.probes).read_text()))
     if remote:
+        router.ownership_index = remote.composite.digest
         remote.start(router)
     server = http.server.ThreadingHTTPServer(('0.0.0.0', args.port), Handler)
     server.router = router

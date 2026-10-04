@@ -1,4 +1,4 @@
-"""Opt-in pinned remote release; existing local materialization stays independent."""
+"""Opt-in pinned remote release with shared storage ownership enforcement."""
 import json
 import os
 from pathlib import Path
@@ -23,6 +23,7 @@ class RemoteRuntime:
         budget = int(env.get('ANIPALS_REMOTE_CACHE_BYTES', str(4 * 1024**3)))
         if not 64 * 1024**2 <= budget <= 16 * 1024**3:
             raise ValueError('remote cache budget must be 64 MiB through 16 GiB')
+        self.composite.install_ownership(self.root)
         self.cache = ObjectCache(self.root / 'object-cache', budget)
         self.bridge = Bridge(self.composite.objects, self.cache, self.fetch).start()
         self.stop = threading.Event()
@@ -37,6 +38,10 @@ class RemoteRuntime:
                         return
                     try:
                         descriptor = self.composite.prepare(self.root, slug)
+                        from regional_ownership import allows
+                        if not allows(self.root, descriptor):
+                            pending.remove(slug)
+                            continue  # Explicit rollback persists across restarts.
                         graph = self.composite.objects.graphs[(slug, descriptor['object_fingerprint'])]
                         # A declared object must be readable before native activation;
                         # an R2 outage cannot masquerade as absent pedestrian edges.
@@ -45,7 +50,8 @@ class RemoteRuntime:
                         with self.cache.open(item, self.fetch):
                             pass
                         verified = router.verify(slug, descriptor['fingerprint'])
-                        activate_region(self.root, descriptor, verified)
+                        activate_region(self.root, descriptor, verified,
+                                        self.composite.digest if self.composite.schema == 2 else None)
                         pending.remove(slug)
                         print(json.dumps(dict(event='remote_graph_activated', region=slug,
                                               fingerprint=descriptor['fingerprint'])), flush=True)

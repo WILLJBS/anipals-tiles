@@ -143,10 +143,10 @@ def verified(descriptor, result):
     return isinstance(result, dict) and result.get('verified') is True and all(result.get(k) == descriptor[k] for k in ('slug', 'fingerprint'))
 
 
-def activate_region(data_root, descriptor, verification):
+def activate_region(data_root, descriptor, verification, index_sha=None):
     if not verified(descriptor, verification):
         raise ValueError('native verification does not match candidate graph')
-    activate(data_root, descriptor)
+    activate(data_root, descriptor, index_sha)
 
 
 def cleanup_legacy(data_root, descriptor, health_callback):
@@ -203,6 +203,8 @@ def priority(root, plan):
 
 
 def run_pass(root, plans, health_callback=verify_native):
+    from regional_ownership import local_allowed
+    plans = [plan for plan in plans if local_allowed(root, plan)]
     adopt_legacy_parts(root, plans)
     failures = []
     for plan in sorted(plans, key=lambda p: priority(root, p)):

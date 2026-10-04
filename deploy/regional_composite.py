@@ -1,4 +1,4 @@
-"""Pinned composite index adds immutable remote regions without replacing local ones."""
+"""Pinned remote catalog with explicit, durable per-region storage ownership."""
 import hashlib
 import json
 import os
@@ -56,7 +56,7 @@ class Composite:
         if not sha(digest) or hashlib.sha256(raw).hexdigest() != digest:
             raise ValueError('composite index SHA256 mismatch')
         value = json.loads(raw)
-        if (type(value.get('schema')) is not int or value['schema'] != 1
+        if (type(value.get('schema')) is not int or value['schema'] not in (1, 2)
                 or value.get('image') != image
                 or value.get('local_coverage_sha256') != canonical_hash(base_coverage)):
             raise ValueError('composite image or local coverage mismatch')
@@ -64,16 +64,20 @@ class Composite:
         if not isinstance(rows, list) or not 1 <= len(rows) <= 512:
             raise ValueError('empty composite remote roster')
         self.rows, self.digest, self.image = {}, digest, image
+        self.schema = value['schema']
+        self.ownership, self.previous_index = None, value.get('previous_index_sha256')
         features = list(base_coverage['features'])
         local = {f['properties']['slug'] for f in features}
         object_manifests = []
         for row in rows:
             slug, fp = row.get('slug'), row.get('graph_fingerprint')
-            if not isinstance(slug, str) or not SLUG.fullmatch(slug) or slug in local or slug in self.rows or not sha(fp):
+            if not isinstance(slug, str) or not SLUG.fullmatch(slug) or slug in self.rows or not sha(fp) or self.schema == 1 and slug in local:
                 raise ValueError('composite cannot replace or duplicate an existing region')
             feature = row['feature']
             if feature.get('type') != 'Feature' or feature['properties'].get('slug') != slug:
                 raise ValueError('composite feature identity mismatch')
+            if slug in local and canonical_hash(feature) != canonical_hash(next(f for f in features if f['properties']['slug'] == slug)):
+                raise ValueError('replacement must preserve exact baseline coverage')
             geometry(feature['geometry'])
             probes = row.get('probes')
             if not isinstance(probes, list) or not 1 <= len(probes) <= 8:
@@ -92,9 +96,18 @@ class Composite:
                 raise ValueError('remote manifest graph or coverage mismatch')
             object_manifests.append((raw_manifest, expected))
             self.rows[slug] = row
-            features.append(feature)
+            if slug not in local:
+                features.append(feature)
+        if self.schema == 2:
+            from regional_ownership import validate_ownership
+            self.ownership = validate_ownership(value, base_coverage, self.rows, image)
         self.objects = ObjectCatalog(object_manifests, image)
         self.coverage = dict(base_coverage, features=features)
+
+    def install_ownership(self, root):
+        if self.ownership is not None:
+            from regional_ownership import install_many
+            install_many(root, self.ownership, self.digest, self.previous_index)
 
     def prepare(self, root, slug):
         root = Path(root).resolve()

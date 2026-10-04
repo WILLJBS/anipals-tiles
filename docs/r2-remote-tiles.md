@@ -132,3 +132,15 @@ under the existing deadline; then mechanically report every reconciled city and
 genuine unroutable case. Code exists for authenticated index consumption, native
 activation, region leases and request-specific R2 failure handling; local tests
 do not establish actual cloud operation. Passing local tests or polygon inclusion is not global navigation success.
+
+
+## Replacing existing local regions
+
+The original schema-1 composite only adds remote regions. Reviewed schema-2
+indices can replace existing local regions through the shared
+[storage ownership and explicit rollback contract](regional-storage-ownership.md).
+They pin the supply catalog and preserve exact baseline feature hashes, retain
+an explicitly reviewed local generation, prevent stale local/remote writers and
+make GC honor that retained generation. The index is opt-in; migration receipts
+or an offline supply catalog do not activate it. Selecting R2 can create a
+regional unavailable interval until native candidate verification completes.

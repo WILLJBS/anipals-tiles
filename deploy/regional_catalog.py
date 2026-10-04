@@ -57,19 +57,23 @@ class Catalog:
 
     def available(self):
         regions = {}
-        for active in (self.root / 'regions').glob('*/active.json'):
-            pointer = json.loads(active.read_text())
-            slug = active.parent.name
+        from regional_ownership import read_pointer, allows
+        parents = {p.parent for pattern in ('*/active.json', '*/ownership.json')
+                   for p in (self.root/'regions').glob(pattern)}
+        for parent in parents:
+            pointer = read_pointer(parent)
+            if pointer is None:
+                continue
+            slug = parent.name
             try:
-                regions[slug] = self.candidate(slug, pointer['fingerprint'])
+                descriptor = self.candidate(slug, pointer['fingerprint'])
             except FileNotFoundError:
-                # Activation may retire the pointer just read. Retry exactly
-                # once only when its fingerprint actually changed; corruption
-                # in the current graph remains an observable failure.
-                current = json.loads(active.read_text())
-                if current['fingerprint'] == pointer['fingerprint']:
+                current = read_pointer(parent)
+                if current is None or current['fingerprint'] == pointer['fingerprint']:
                     raise
-                regions[slug] = self.candidate(slug, current['fingerprint'])
+                descriptor = self.candidate(slug, current['fingerprint'])
+            if allows(self.root, descriptor):
+                regions[slug] = descriptor
         return regions
 
     def candidate(self, slug, fingerprint):

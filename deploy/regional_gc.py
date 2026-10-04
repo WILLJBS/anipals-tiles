@@ -3,67 +3,14 @@ import errno
 import fcntl
 import json
 import os
-import re
 import shutil
-from contextlib import contextmanager
 from pathlib import Path
 from regional_storage import atomic_json, sync_dir
+from regional_state import identity, safe_path, file_lock, read_retired, region_parent
+from regional_ownership import read_pointer, read_control, assert_activation, write_active
 
 
-def identity(slug, fingerprint):
-    if not isinstance(slug, str) or not re.fullmatch(r'[a-z0-9-]{1,120}', slug):
-        raise ValueError('unsafe region slug')
-    if not isinstance(fingerprint, str) or not re.fullmatch(r'[0-9a-f]{64}', fingerprint):
-        raise ValueError('unsafe graph fingerprint')
-
-
-def safe_path(path):
-    if path.is_symlink() or path.resolve() != path:
-        raise ValueError('symlinked graph storage is forbidden')
-    return path
-
-
-@contextmanager
-def file_lock(path, operation):
-    # O_NOFOLLOW protects lock identity even if a symlink appears after precheck.
-    safe_path(path)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    try:
-        fcntl.flock(fd, operation)
-        yield fd
-    finally:
-        # Do not explicitly LOCK_UN: inherited native FDs keep the same lease.
-        os.close(fd)
-
-
-def read_pointer(parent):
-    active = safe_path(parent / 'active.json')
-    if not active.exists():
-        return None
-    pointer = json.loads(active.read_text())
-    identity(parent.name, pointer['fingerprint'])
-    return pointer
-
-
-def read_retired(parent):
-    path = safe_path(parent / 'retired.json')
-    queue = json.loads(path.read_text())['fingerprints'] if path.exists() else []
-    if not isinstance(queue, list) or len(queue) != len(set(queue)):
-        raise ValueError('invalid retirement queue')
-    for fingerprint in queue:
-        identity(parent.name, fingerprint)
-    return queue
-
-
-def region_parent(data_root, slug):
-    root = Path(data_root).resolve()
-    regions = safe_path(root / 'regions')
-    parent = safe_path(regions / slug)
-    parent.mkdir(parents=True, exist_ok=True)
-    return parent
-
-
-def activate(data_root, descriptor):
+def activate(data_root, descriptor, index_sha=None):
     """Caller proves native verification; immutable marker proves graph identity."""
     slug, fingerprint = descriptor['slug'], descriptor['fingerprint']
     identity(slug, fingerprint)
@@ -73,6 +20,7 @@ def activate(data_root, descriptor):
         marker = safe_path(graph / '.complete.json')
         if not marker.exists() or json.loads(marker.read_text()) != descriptor:
             raise ValueError('cannot activate an incomplete graph')
+        control = assert_activation(parent, descriptor, index_sha)
         pointer = read_pointer(parent)
         queue = read_retired(parent)
         if pointer and pointer['fingerprint'] != fingerprint:
@@ -82,7 +30,11 @@ def activate(data_root, descriptor):
             # Journal first: a crash before active switch is safe because GC
             # rechecks active under this same lock and never deletes that graph.
             atomic_json(parent / 'retired.json', {'fingerprints': queue})
-        atomic_json(parent / 'active.json', {k: descriptor[k] for k in ('fingerprint', 'release')})
+        selected = {k: descriptor[k] for k in ('fingerprint', 'release')}
+        if control is None:
+            atomic_json(parent / 'active.json', selected)
+        else:
+            write_active(parent, selected, control)
 
 
 def collect_region(parent):
@@ -91,8 +43,13 @@ def collect_region(parent):
     with file_lock(parent / '.activation.lock', fcntl.LOCK_EX):
         pointer = read_pointer(parent)
         queue = read_retired(parent)
+        control = read_control(parent)
+        retained = control['rollback']['fingerprint'] if control and control['rollback'] else None
         remaining = []
         for fingerprint in queue:
+            if fingerprint == retained:
+                remaining.append(fingerprint)
+                continue
             if pointer and pointer['fingerprint'] == fingerprint:
                 # Retirement journal survived a crash before the active switch.
                 continue
@@ -116,7 +73,7 @@ def collect_region(parent):
                 remaining.append(fingerprint)
         if remaining != queue:
             atomic_json(parent / 'retired.json', {'fingerprints': remaining})
-        return len(remaining)
+        return len([fp for fp in remaining if fp != retained])
 
 
 def collect_retired(data_root):

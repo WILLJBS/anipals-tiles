@@ -40,6 +40,19 @@ def main():
     router = spawn([sys.executable, str(BASE / 'regional_router.py')])
 
     def materialize():
+        # Index ownership must be installed before any local worker starts.
+        expected_index = os.environ.get('ANIPALS_REMOTE_INDEX_SHA256')
+        while expected_index and not stop.is_set():
+            try:
+                with urllib.request.urlopen('http://127.0.0.1:8002/status', timeout=5) as response:
+                    status = json.load(response)
+                if status.get('ownership_index') == expected_index:
+                    break
+            except (OSError, ValueError):
+                pass
+            stop.wait(2)
+        if stop.is_set():
+            return
         # Release changes are code-reviewed, not implicit GitHub latest changes.
         tag = (SHARE / 'anipals-tile-release.txt').read_text().strip()
         target = Path('/data/regions') / ('release-' + tag + '.json')
