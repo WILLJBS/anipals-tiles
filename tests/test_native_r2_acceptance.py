@@ -64,6 +64,7 @@ class GateTests(unittest.TestCase):
         def check(value, bad_hash=False):
             raw = json.dumps(value).encode()
             self.args.manifest_sha = '0'*64 if bad_hash else hashlib.sha256(raw).hexdigest()
+            self.receipt.update(manifest_size=len(raw), manifest_sha256=self.args.manifest_sha)
             return verify_manifest(raw, self.args, self.receipt, self.receipt['feature'], self.profile, self.plans[0])
         check(manifest)
         for key, value in [('image', 'valhalla/valhalla@sha256:'+'0'*64), ('graph_fingerprint', '0'*64),
@@ -72,6 +73,20 @@ class GateTests(unittest.TestCase):
                 check(dict(manifest, **{key: value}))
         with self.assertRaises(ValueError):
             check(manifest, True)
+
+    def test_source_proof_numeric_boolean_substitution_rejected(self):
+        from migration_receipts import verify_manifest
+        inventory = {'2/000/001.gph': dict(size=3, sha256='e'*64)}
+        graph = canonical_hash({p: row['sha256'] for p, row in inventory.items()})
+        manifest = dict(schema=1, slug='test', graph_fingerprint=graph, image=self.profile['image'],
+                        validation='gph-v3-index-v1', coverage_sha256=canonical_hash(self.receipt['feature']),
+                        tiles=inventory, validation_report=dict(tiles=1), input_provenance={'counter': True},
+                        source=dict(kind='github-release-region', tag='tiles-test', parts=self.plans[0]['parts']))
+        raw = json.dumps(manifest).encode(); self.args.manifest_sha=hashlib.sha256(raw).hexdigest()
+        self.receipt.update(graph_fingerprint=graph, manifest_size=len(raw), manifest_sha256=self.args.manifest_sha)
+        ready = dict(graph_fingerprint=graph, tiles=1, input_provenance={'counter': 1})
+        with self.assertRaisesRegex(ValueError, 'READY_PROOF'):
+            verify_manifest(raw, self.args, self.receipt, self.receipt['feature'], self.profile, self.plans[0], ready)
 
     def test_probe_rejects_snap_radius_and_outside(self):
         value = dict(schema=1, slug='test', provenance='Synthetic fixture, not production acceptance',

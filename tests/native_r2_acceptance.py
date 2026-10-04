@@ -32,40 +32,15 @@ def pinned_file(path, expected, maximum):
     return raw
 
 
-def verify_receipt(receipt, args, profile, plans, release, bucket):
-    from migration_contract import migration_identity
-    from regional_release import canonical_hash, sha
-    registered = dict(schema=1, registry=args.contract, checkout_sha=args.migration_sha,
-                      definition_sha256=canonical_hash(profile['definition']))
-    contract = migration_identity(release, profile['image'], profile['coverage'], plans, registered)
-    require(receipt.get('schema') == 1 and receipt.get('bucket') == bucket
-            and receipt.get('slug') == args.slug and receipt.get('contract') == contract
-            and receipt.get('registered_source') == registered
-            and sha(receipt.get('graph_fingerprint'))
-            and receipt.get('manifest_sha256') == args.manifest_sha
-            and type(receipt.get('manifest_size')) is int and 0 < receipt['manifest_size'] <= 32*1024*1024
-            and type(receipt.get('tiles')) is int and receipt['tiles'] > 0,
-            'INCOMPLETE_OR_SUBSTITUTED_REGION_RECEIPT')
-    feature = next(f for f in profile['coverage']['features'] if f['properties']['slug'] == args.slug)
-    require(receipt.get('feature') == feature, 'RECEIPT_COVERAGE_DIFFERS')
-    return feature
+# The CLI adds its exact checkout tools path before calling these shared helpers.
+def verify_receipt(*args, **kwargs):
+    from migration_receipts import verify_receipt as shared
+    return shared(*args, **kwargs)
 
 
-def verify_manifest(raw, args, receipt, feature, profile, plan):
-    from regional_objects import ObjectCatalog
-    from regional_release import canonical_hash
-    catalog = ObjectCatalog([(raw, args.manifest_sha)], profile['image'])
-    identity = args.slug, receipt['graph_fingerprint']
-    require(set(catalog.graphs) == {identity}, 'GRAPH_IDENTITY_DIFFERS')
-    manifest = catalog.graphs[identity]
-    require(len(manifest['tiles']) == receipt['tiles']
-            and manifest['coverage_sha256'] == canonical_hash(feature)
-            and manifest.get('source') == dict(kind='github-release-region', tag=args.tag,
-                parts=[{k: p[k] for k in ('name', 'size', 'sha256')} for p in plan['parts']]),
-            'MANIFEST_SOURCE_OR_COVERAGE_DIFFERS')
-    require(manifest.get('validation_report', {}).get('tiles') == receipt['tiles'],
-            'MANIFEST_FULL_VALIDATION_MISSING')
-    return catalog, manifest
+def verify_manifest(*args, **kwargs):
+    from migration_receipts import verify_manifest as shared
+    return shared(*args, **kwargs)
 
 
 def probe_payload(raw, feature, slug):
@@ -153,6 +128,7 @@ def main():
     sys.path[:0] = [str(root/'deploy'), str(root/'tools')]
     from migration_contract import load_profile, source_revision, validate_profile_supply
     from migration_ci import receipt_key
+    from navigation_catalog_inputs import decode
     from regional_composite import read_object
     from regional_engine import Engine
     from regional_object_cache import ObjectCache
@@ -165,7 +141,7 @@ def main():
     require(re.fullmatch('[0-9a-f]{40}', args.migration_sha)
             and 0 < args.receipt_size <= 8*1024*1024, 'INVALID_RECEIPT_INPUT')
     profile = load_profile(args.contract, root=root)
-    release = json.loads(pinned_file(args.release, args.release_sha, 16*1024*1024))
+    release = decode(pinned_file(args.release, args.release_sha, 16*1024*1024))
     require(release.get('tag_name') == args.tag, 'RELEASE_TAG_DIFFERS')
     ready = pinned_file(args.ready, args.ready_sha, 4*1024*1024)
     plans = validate_profile_supply(profile, release, ready)
@@ -185,15 +161,16 @@ def main():
             fetch = regional_r2.reader()
         finally:
             regional_r2.connection = original
-        receipt = json.loads(read_object(fetch, key, args.receipt_sha, 8*1024*1024, args.receipt_size))
+        receipt = decode(read_object(fetch, key, args.receipt_sha, 8*1024*1024, args.receipt_size))
         feature = verify_receipt(receipt, args, profile, plans, release, bucket)
         require(receipt['graph_fingerprint'] == args.graph_fingerprint
                 and receipt['manifest_size'] == args.manifest_size, 'REQUEST_MANIFEST_IDENTITY_DIFFERS')
         prefix = 'navigation/graphs/%s/%s/' % (args.slug, receipt['graph_fingerprint'])
         raw = read_object(fetch, prefix+'manifests/'+args.manifest_sha+'.json',
                           args.manifest_sha, 32*1024*1024, receipt['manifest_size'])
-        catalog, manifest = verify_manifest(raw, args, receipt, feature, profile, plan)
-        ready_value = {} if ready == b'ok\n' else json.loads(ready)
+        ready_value = {} if ready == b'ok\n' else decode(ready)
+        ready_region = ready_value.get('region_manifests', {}).get(args.slug)
+        catalog, manifest = verify_manifest(raw, args, receipt, feature, profile, plan, ready_region)
         expected_graph = ready_value.get('region_manifests', {}).get(args.slug, {}).get('graph_fingerprint')
         require(expected_graph is None or expected_graph == receipt['graph_fingerprint'], 'READY_GRAPH_DIFFERS')
         payload = probe_payload(probe_raw, feature, args.slug)
