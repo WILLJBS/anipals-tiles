@@ -13,6 +13,7 @@ from regional_engine import Engine, EngineError
 from regional_release import canonical_hash
 
 from native_scope_records import OFFSETS, error_record, response_record
+from native_scope_geometry import locate_geometry, route_geometry
 
 
 def diagnose(slug, tiles, probe, feature, validation, template, engine_factory=Engine, output_path=None):
@@ -31,7 +32,11 @@ def diagnose(slug, tiles, probe, feature, validation, template, engine_factory=E
         points=[], routes=[], changes_to_source_or_acceptance=False)
     def request(action, payload):
         try:
-            return response_record(action, engine.request(region, action, payload))
+            response = engine.request(region, action, payload)
+            record = response_record(action, response)
+            if action == 'locate': record.update(locate_geometry(response, payload['locations'][0]))
+            if action == 'route': record.update(route_geometry(response, payload['locations']))
+            return record
         except EngineError as error:
             return error_record(error)
     try:
@@ -65,23 +70,43 @@ def diagnose(slug, tiles, probe, feature, validation, template, engine_factory=E
                 json.dumps(result, allow_nan=False)+'\n')
 
 
+def select_probes(scope, gate, validation, slug):
+    if (gate.get('slug') != slug or gate.get('scope_sha256') != canonical_hash(scope['probes'])
+            or gate.get('graph_fingerprint') != canonical_hash(validation['tile_hashes'])):
+        raise ValueError('diagnostic gate identity differs')
+    selected = {r['source_row'] for r in gate['routes']
+                if r.get('classification') not in ('nonzero_route', 'outside_coverage')}
+    probes = [x for x in scope['probes'] if x['source_row'] in selected]
+    if {p['source_row'] for p in probes} != selected:
+        raise ValueError('diagnostic source rows differ')
+    return probes
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--slug', required=True); parser.add_argument('--source-row', required=True, type=int)
+    parser.add_argument('--slug', required=True)
+    select = parser.add_mutually_exclusive_group(required=True)
+    select.add_argument('--source-row', type=int)
+    select.add_argument('--gate-report', help='Diagnose anomalous attempts even if a later offset passed')
     parser.add_argument('--tiles', default='tiles'); parser.add_argument('--validation', default='tile-validation.json')
     parser.add_argument('--spec', default='deploy/global-additions-scopes.json')
     parser.add_argument('--coverage', default='deploy/global-additions-coverage.json')
     parser.add_argument('--output', default='native-scope-diagnostic.json')
     args = parser.parse_args()
     scope = next(x for x in json.loads(Path(args.spec).read_text())['builds'] if x['slug']==args.slug)
-    probe = next(x for x in scope['probes'] if x['source_row']==args.source_row)
     feature = next(f for f in json.loads(Path(args.coverage).read_text())['features'] if f['properties']['slug']==args.slug)
     if canonical_hash(scope['probes']) != feature['properties']['native_probe_sha256']:
         raise ValueError('diagnostic scope differs from frozen coverage')
     validation = json.loads(Path(args.validation).read_text())
     template = json.loads(subprocess.check_output(['valhalla_build_config']))
-    output = diagnose(args.slug, args.tiles, probe, feature, validation, template, output_path=args.output)
-    print(json.dumps(dict(kind=output['kind'], classifications=[r['classification'] for r in output['routes']])))
+    if args.gate_report:
+        probes = select_probes(scope, json.loads(Path(args.gate_report).read_text()), validation, args.slug)
+    else:
+        probes = [next(x for x in scope['probes'] if x['source_row'] == args.source_row)]
+    for probe in probes:
+        output_path = str(Path(args.output).with_name(Path(args.output).stem+'-'+str(probe['source_row'])+'.json')) if args.gate_report else args.output
+        output = diagnose(args.slug, args.tiles, probe, feature, validation, template, output_path=output_path)
+        print(json.dumps(dict(kind=output['kind'], source_row=probe['source_row'], classifications=[r['classification'] for r in output['routes']])))
 
 
 if __name__ == '__main__':

@@ -127,7 +127,19 @@ jobs:
           NATIVE_FLAGS=()
           if [ -n "$SCOPE_FILE" ]; then
             [[ "$SCOPE_FILE" =~ ^deploy/[a-z0-9-]+\.json$ ]]
-            docker run --rm -v "$PWD:/data" -w /data -e SCOPE_FILE="$SCOPE_FILE" -e REGION_COVERAGE_FILE -e BUILD_SLUG "$VALHALLA_IMAGE" bash -c 'set -e; apt-get update -qq; DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y -qq python3; python3 tests/native_scope_smoke.py --slug "$BUILD_SLUG" --spec "$SCOPE_FILE" --coverage "$REGION_COVERAGE_FILE"'
+            docker run --rm -v "$PWD:/data" -w /data -e SCOPE_FILE="$SCOPE_FILE" -e REGION_COVERAGE_FILE -e BUILD_SLUG "$VALHALLA_IMAGE" bash -c '
+              set -e
+              apt-get update -qq
+              DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y -qq python3
+              gate_status=0
+              python3 tests/native_scope_smoke.py --slug "$BUILD_SLUG" --spec "$SCOPE_FILE" --coverage "$REGION_COVERAGE_FILE" || gate_status=$?
+              # Before graph cleanup, retain numeric correlation evidence for any
+              # failed offset, including scopes whose later offset passed.
+              if [ -f native-scope-diagnostic.json ]; then
+                python3 tests/native_scope_diagnose.py --slug "$BUILD_SLUG" --spec "$SCOPE_FILE" --coverage "$REGION_COVERAGE_FILE" --gate-report native-scope-diagnostic.json --output native-correlation.json
+              fi
+              exit "$gate_status"
+            '
             NATIVE_FLAGS=(--native-validation native-probes.json)
           fi
           # free disk BEFORE tar: pbf+filtered can be 12 GB (US), and tar needs
@@ -152,6 +164,7 @@ jobs:
           path: |
             native-probes.json
             native-scope-diagnostic.json
+            native-correlation-*.json
             tile-validation.json
             calib.txt
   final:

@@ -127,3 +127,26 @@ Full graph builds and release rescue require explicit dispatch; image candidates
 use reviewed SHA tags and native route gates rather than silently moving latest.
 This update describes code changes; it does not assert that remote deployment or
 all 61 native regional route checks have completed.
+
+### Native correlation evidence after a scope gate (2026-10-04)
+
+The build now runs the existing independent scope diagnostic before graph cleanup
+for source rows with anomalous native attempts, including a row whose later offset
+passed. Its selection verifies the gate's scope hash and graph fingerprint. The
+original smoke return status and 0 < length < 5 acceptance rule remain unchanged;
+diagnostic output cannot create a native acceptance proof.
+
+The allowlisted artifact retains native projected-distance extrema and polyline6
+first/last endpoint offsets, point count and endpoint equality. Missing/invalid
+geometry is explicit, not a zero-distance default. Coordinates, encoded shapes,
+OSM edge IDs and native raw payloads remain process-local. ABI/error status/code
+fields retain existing mappings. Every fact is bound to the frozen source-row
+identity and actual graph fingerprint; distances do not by themselves approve a
+public destination or change its position.
+
+Valhalla documents [locate projections](https://valhalla.github.io/valhalla/api/locate/api-reference/)
+and [six-digit shape precision](https://valhalla.github.io/valhalla/api/decoding/).
+Offline regressions cover projected distances, exact polyline6 decoding, duplicate
+endpoints, malformed inputs, no coordinate disclosure, unchanged native error
+mapping and the actual shell's preservation of a failed gate exit status. Real
+Bakwa/Lander correlation results still require the next two-region diagnostic run.
