@@ -148,7 +148,9 @@ intervals; source download and individual structural validation emit on return.
 A timed-out region has no completion receipt merely because some tile keys
 exist. A retry rechecks the complete source and structure, fully GET-verifies
 existing objects and uploads missing objects; it cannot replace the SHA gate
-with a key listing. Do not cancel other regions that are still finishing.
+with a key listing. Ordinary single-region recovery must not cancel unrelated
+regions that are still finishing. A deliberate queue upgrade instead follows
+the evidence-preserving supersession procedure below.
 A recovery run must use a fresh pilot bound to its reviewed source revision.
 Previously successful regional receipts retain their original source revision
 and contract. Never rewrite old receipts to make them appear produced by new

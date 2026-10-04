@@ -3,6 +3,12 @@ name: native-r2-acceptance
 on:
   workflow_dispatch:
     inputs:
+      acceptance_mode:
+        description: Explicit isolated runtime or existing read-only transport acceptance
+        type: choice
+        options: [read-only, runtime-isolated]
+        default: read-only
+        required: true
       source_sha:
         description: Exact reviewed runner commit; dispatch matching ref
         required: true
@@ -21,10 +27,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: native-r2-acceptance
+  group: ${{ inputs.acceptance_mode == 'runtime-isolated' && 'native-runtime-isolated' || 'native-r2-acceptance' }}
   cancel-in-progress: false
 jobs:
   native:
+    if: ${{ !inputs.acceptance_mode || inputs.acceptance_mode == 'read-only' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -62,5 +69,48 @@ jobs:
           INPUT_BYTES: ${{ inputs.input_bytes }}
         run: |
           python tools/native_r2_ci.py --source-sha "$SOURCE_SHA" \
+            --input-key "$INPUT_KEY" --input-sha "$INPUT_SHA" --input-bytes "$INPUT_BYTES"
+  runtime:
+    if: ${{ inputs.acceptance_mode == 'runtime-isolated' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Match reviewed isolated dispatch and checkout
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$GITHUB_WORKFLOW_SHA" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned storage SDK
+        run: python -m pip install --disable-pip-version-check -r tools/storage-requirements.txt
+      - name: Offline isolated runtime and complete-source guards
+        run: |
+          python -m unittest discover -s tests -p 'test_native_runtime*.py'
+          python -m unittest discover -s tests -p 'test_runtime_index.py'
+          python -m unittest discover -s tests -p 'test_plan_native_runtime.py'
+      - name: Create owned source volume and verify native activation and rollback
+        timeout-minutes: 55
+        env:
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ inputs.bucket }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT_KEY: ${{ inputs.input_key }}
+          INPUT_SHA: ${{ inputs.input_sha }}
+          INPUT_BYTES: ${{ inputs.input_bytes }}
+        run: |
+          python tools/native_runtime_ci.py --source-sha "$SOURCE_SHA" \
             --input-key "$INPUT_KEY" --input-sha "$INPUT_SHA" --input-bytes "$INPUT_BYTES"
 # Code, metadata, probes, native output and logs never become Actions artifacts.

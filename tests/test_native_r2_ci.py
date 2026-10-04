@@ -65,12 +65,12 @@ class ContractTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 execution(source, dict(env, **{key: bad}))
 
-    def test_workflow_only_five_dispatch_inputs_and_no_public_artifacts(self):
+    def test_workflow_only_six_dispatch_inputs_and_no_public_artifacts(self):
         import re
         text = (ROOT/'.github/workflows/native-r2-acceptance.yml').read_text()
         inputs = text.split('    inputs:\n', 1)[1].split('permissions:', 1)[0]
         self.assertEqual(set(re.findall(r'^      ([a-z_]+):$', inputs, re.M)),
-                         {'source_sha', 'bucket', 'input_key', 'input_sha', 'input_bytes'})
+                         {'acceptance_mode', 'source_sha', 'bucket', 'input_key', 'input_sha', 'input_bytes'})
         self.assertNotIn('upload-artifact', text)
         self.assertNotIn('push:', text)
         self.assertIn('persist-credentials: false', text)

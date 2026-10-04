@@ -1,8 +1,9 @@
 # Isolated native storage ownership acceptance candidate
 
-This harness exercises an actual candidate on an independently prepared local
-volume. It is **not wired to a dispatch workflow**, does not prepare that volume,
-and has not yet passed a real native/R2 run. Its offline tests use explicitly
+This harness exercises a candidate on an independently prepared local volume.
+The explicit runtime-isolated workflow mode now invokes it through the
+[controlled source runner](native-runtime-runner.md). This complete isolated
+workflow has not yet passed a real native/R2 run. Offline tests use explicitly
 synthetic tiles and a mocked engine; they are regression tests, not cloud proof.
 
 The existing read-only native gate verifies individual immutable graphs. It does
@@ -12,14 +13,14 @@ test gap without introducing a second catalog/receipt validator.
 
 ## Required trusted runner integration
 
-A future runner must use the exact source SHA in both the actual GitHub runner
-and workflow contexts, build that candidate image, and create a unique private
-volume beneath its actual `RUNNER_TEMP`. Source preparation must fetch and
-verify the registered original release bytes, materialize real local graphs,
-perform native validation, and record the actual inventory on that same volume.
+The controlled runner uses the exact source SHA in both the actual GitHub runner
+and workflow contexts, builds that candidate image, and creates a unique private
+volume beneath its actual `RUNNER_TEMP`. Source preparation fetches and
+verifies the registered original release bytes, materializes real local graphs,
+performs native validation, and records the actual inventory on that same volume.
 A caller-supplied “isolated” label does not attest a nonproduction volume.
 
-In the same trusted run, it can create the isolated assembly request and invoke
+In the same trusted run, it creates the isolated assembly request and invokes
 this harness. The newly generated index SHA is a candidate acceptance result for
 review, not a previously reviewed production index. This requires no additional
 user approval loop. Production still needs its exact reviewed index and actual
@@ -27,10 +28,10 @@ production-volume inventory.
 
 The CLI checks the existing `native_r2_contract.execution` identity, clean exact
 checkout, candidate revision, and canonical descendant of `RUNNER_TEMP`. Those
-checks are additional guards, **not substitutes for the missing trusted source
-preparation runner**. It deliberately accepts only the existing registered
-native acceptance workflow context; adding a new workflow requires registering
-and testing that execution contract. No current workflow invokes this CLI.
+checks are additional guards, **not substitutes for the controlled source
+preparation runner**. It accepts the existing registered native acceptance
+workflow context. Its runtime-isolated mode preserves that actual execution
+contract and invokes this CLI through the source preparation entry point.
 
 Run inside the exact candidate diagnostic environment, with existing pinned SDK
 and native binaries, after controlled volume preparation:
@@ -93,9 +94,9 @@ candidate still needs all 61 receipts in its registered original source group.
 A partial migration cannot be relabelled as a complete original source.
 Likewise 127/129 does not satisfy the additions group.
 
-Remaining implementation work: controlled real-source volume preparation,
-private request/result transport, candidate Docker execution with this harness,
-explicit workflow scheduling and cleanup, and actual native/R2 acceptance.
-The diagnostic files are not production Docker inputs and no production COPY
-list changes are required. Future diagnostic image wiring must explicitly
-include these new harness files and preserve its build input contract.
+The controlled source runner now provides private request/result transport,
+candidate Docker execution, explicit workflow selection, and cleanup. Remaining
+acceptance requires complete source-group inputs and a successful actual run
+against its exact committed runner SHA. The diagnostic files are consumed
+through the exact read-only checkout mount; they are not production Docker COPY
+inputs. See the runner document for its input and resource contracts.
