@@ -15,7 +15,9 @@ class Store:
     def __init__(self, corrupt=False):
         self.created = False;self.parts = [];self.completed = False;self.aborted = False;self.corrupt = corrupt
     def head_object(self, **args):
-        raise Missing()
+        if not self.parts: raise Missing()
+        return {'ContentLength': len(b''.join(self.parts)),
+                'Metadata': self.metadata, 'ETag': '"actual-etag-2"'}
     def create_multipart_upload(self, **args):
         self.created = True;self.metadata = args['Metadata'];return {'UploadId': 'fixture'}
     def upload_part(self, **args):
@@ -25,7 +27,12 @@ class Store:
     def abort_multipart_upload(self, **args):
         self.aborted = True
     def get_object(self, **args):
-        return {'Body': io.BytesIO(b'bad' if self.corrupt else b''.join(self.parts)),
+        raw = b'bad' if self.corrupt else b''.join(self.parts)
+        start, end = map(int, args['Range'].removeprefix('bytes=').split('-'))
+        assert args['IfMatch'] == '"actual-etag-2"'
+        return {'Body': io.BytesIO(raw[start:end+1]), 'ContentLength': end-start+1,
+                'ContentRange': f'bytes {start}-{end}/{len(raw)}',
+                'ResponseMetadata': {'HTTPStatusCode': 206},
                 'Metadata': self.metadata, 'ETag': '"actual-etag-2"'}
 
 

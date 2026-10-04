@@ -38,8 +38,18 @@ upload with per-part Content-MD5, bounded part buffers and no full archive on
 runner disk. Full source SHA must match before `CompleteMultipartUpload` with
 `IfNoneMatch: *`. Existing or concurrent objects are never overwritten.
 
-A complete receipt is written only after a full R2 GET validates size, SHA and
-SHA custom metadata and records the actual ETag. A conditional completion race
+A complete receipt is written only after the complete ordered R2 byte stream
+passes size and full SHA checks. `tools/display_readback.py` reads bounded
+64 MiB ranges in 1 MiB chunks and pins every request to the initial HEAD ETag
+with `IfMatch`. Each response must have status 206, exact Content-Range and
+length, unchanged ETag and SHA metadata, and identity content encoding.
+Transient transport failures and premature EOF retry the current range at most
+three stream attempts, two seconds apart; identity/metadata/range mismatches
+fail immediately. Every attempt starts from a copy of the last successful
+digest, so failed bytes never count twice. The existing SDK may additionally
+retry pre-response requests up to three times (nine requests maximum per
+range); it cannot retry a consumed stream. A final conditional HEAD rechecks
+identity and metadata before returning the full SHA receipt and actual ETag. A conditional completion race
 verifies the winner and aborts the caller's unused multipart. Source errors,
 SHA mismatch and graceful cancellation abort an unfinished upload. Abort errors
 retain the primary exception and report `multipart_abort_failed`.
@@ -47,9 +57,11 @@ retain the primary exception and report `multipart_abort_failed`.
 The job timeout is 350 minutes, below the hosted runner's six-hour limit. The
 shared CI timeout policy explicitly registers this large archive job's ceiling;
 ordinary jobs keep their 180-minute maximum. It is
-not a throughput guarantee. There is intentionally no serialized SHA state or
-complex partial-transfer resumption; an interrupted unfinished transfer restarts
-from byte zero. SIGKILL/runner disappearance may prevent cleanup: an operator
+not a throughput guarantee. There is intentionally no serialized SHA state.
+A new verification process rechecks every byte from zero; within a process,
+only a failed range repeats. Restarting after multipart completion reuses the
+existing object without any source read or upload. An interrupted unfinished
+source transfer restarts from byte zero. SIGKILL/runner disappearance may prevent cleanup: an operator
 must list and review abandoned multipart uploads and explicitly abort the exact
 matching upload. An incomplete checkpoint must never be treated as a completed
 asset. Do not publish a registry merely because multipart completion succeeded;
@@ -62,8 +74,9 @@ Local tests cover successful full source/readback SHA, malformed HTTP ranges,
 truncation, changed source, full SHA mismatch, conditional-winner integrity and
 abort/interruption handling. The first cloud attempt failed at source HTTP retrieval without completing
 publication; the fixed reader has passed a real 127-byte source preflight.
-Complete cloud multipart publication and full R2 readback remain pending. No Worker release
-or production switch is implied. Receipts are uploaded as workflow artifacts;
+The subsequent cloud run completed multipart publication, but full R2
+readback failed as described below. The corrected bounded readback still needs
+a successful cloud run. No Worker release or production switch is implied. Receipts are uploaded as workflow artifacts;
 secrets remain scoped to the transfer step and are never written to receipts.
 
 
@@ -91,3 +104,30 @@ HTTP status where available, error class/recognized S3 code and abort outcome;
 response URLs, raw HTTP bodies and arbitrary exception messages are excluded.
 Readiness is not claimed until a subsequent cloud run completes all original
 full-object source and R2 integrity checks.
+
+
+## Interrupted full-object readback diagnosed 2026-10-04
+
+Cloud run `37209881731` completed all 1,293 source parts and the full source SHA
+check, then failed at `r2_verify` with `ResponseStreamingError`. A later R2 HEAD
+found the completed 86,753,200,519-byte object and matching SHA metadata. HEAD
+metadata alone does not prove stored-byte integrity and is never a completion
+receipt. The old verifier held one unbounded GET open for the whole object and
+had no stream retry; a late disconnect discarded its entire verification.
+
+The corrected verifier retains the pinned source URL, expected full SHA and
+completed object. Each fully consumed range advances a `complete: false`
+progress event; retry events report only offsets, counts and attempt number.
+It never logs exception details, credentials, signed URLs or source bytes.
+Only the caller's final full-hash/identity success writes `complete: true`.
+The workflow runs both display test modules before applying the transfer.
+
+Offline regression includes a real botocore `StreamingBody` transport failure
+converted to `ResponseStreamingError`, failures after an already verified
+range, retry exhaustion and closure, truncated/oversized responses, changed
+ETag or metadata, conditional 412, invalid range/status, same-size corruption,
+final HEAD drift, and reusing an existing object without upstream access.
+The SHA gate covers the entire original byte sequence rather than independent
+range hashes or a metadata-only check.
+
+Protocol reference: [S3 GetObject Range and If-Match](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html).

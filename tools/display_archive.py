@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / 'deploy'))
 from regional_storage import atomic_json as save
 from regional_r2 import connection
 from storage_errors import error_details
+from display_readback import verify_remote, SAFE_REASONS as READBACK_REASONS
 
 
 def conflict(error):
@@ -48,7 +49,7 @@ USER_AGENT = 'AniPals-Archive/1.0 (+https://anipals.app)'
 SAFE_REASONS = frozenset(('SOURCE_RANGE_IDENTITY_MISMATCH', 'SOURCE_RANGE_SIZE_MISMATCH',
     'SOURCE_PMTILES_HEADER_MISMATCH', 'SOURCE_PART_SIZE_MISMATCH', 'FULL_SOURCE_SHA_MISMATCH',
     'REMOTE_SIZE_MISMATCH', 'REMOTE_SHA_MISMATCH', 'REMOTE_METADATA_MISMATCH',
-    'REMOTE_ETAG_MISSING', 'EXACT_REVIEWED_SOURCE_SHA_REQUIRED'))
+    'REMOTE_ETAG_MISSING', 'EXACT_REVIEWED_SOURCE_SHA_REQUIRED')) | READBACK_REASONS
 
 
 def read_range(start, end, size, opener=urlopen, sleep=time.sleep):
@@ -98,27 +99,6 @@ def failure_details(error):
             'multipart_abort_failed': bool(vars(error).get('multipart_abort_failed', False))}
 
 
-def verify_remote(client, bucket, key, size, sha256):
-    response = client.get_object(Bucket=bucket, Key=key)
-    digest, count = hashlib.sha256(), 0
-    try:
-        for data in iter(lambda: response['Body'].read(8 * 1024 * 1024), b''):
-            count += len(data)
-            if count > size:
-                raise ValueError('REMOTE_SIZE_MISMATCH')
-            digest.update(data)
-    finally:
-        response['Body'].close()
-    if count != size or digest.hexdigest() != sha256:
-        raise ValueError('REMOTE_SHA_MISMATCH')
-    if response.get('Metadata', {}).get('sha256') != sha256:
-        raise ValueError('REMOTE_METADATA_MISMATCH')
-    etag = response.get('ETag', '').strip('"')
-    if not etag:
-        raise ValueError('REMOTE_ETAG_MISSING')
-    return {'key': key, 'bytes': size, 'sha256': sha256, 'etag': etag}
-
-
 def transfer(client, bucket, *, key=KEY, size=SIZE, sha256=SHA256, part_size=PART_SIZE,
              reader=read_range, progress=lambda value: None, preflight=None):
     try:
@@ -128,7 +108,7 @@ def transfer(client, bucket, *, key=KEY, size=SIZE, sha256=SHA256, part_size=PAR
             raise
         existing = None
     if existing is not None:
-        return step('r2_verify', verify_remote, client, bucket, key, size, sha256)
+        return step('r2_verify', verify_remote, client, bucket, key, size, sha256, progress=progress)
     if preflight is not None:
         step('source_preflight', preflight)
     request = {'Bucket': bucket, 'Key': key}
@@ -156,7 +136,7 @@ def transfer(client, bucket, *, key=KEY, size=SIZE, sha256=SHA256, part_size=PAR
             if not conflict(error):
                 raise
         # An existing concurrent winner is only acceptable after full GET/SHA.
-        return step('r2_verify', verify_remote, client, bucket, key, size, sha256)
+        return step('r2_verify', verify_remote, client, bucket, key, size, sha256, progress=progress)
     except BaseException as error:
         failure = error
         if not vars(error).get('transfer_stage'): error.transfer_stage = 'source_validation'
