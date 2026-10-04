@@ -7,7 +7,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS = 'tools/storage-requirements.txt'
 STORAGE_WORKFLOWS = {'migrate-release-r2.yml', 'display-basemap-publish.yml',
-                     'verify-private-archive.yml', 'collect-private-places.yml'}
+                     'verify-private-archive.yml', 'collect-private-places.yml',
+                     'collect-private-places-full.yml'}
 
 
 def requirement_errors(text):

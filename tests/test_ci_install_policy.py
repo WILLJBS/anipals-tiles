@@ -5,8 +5,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 # Large official archive ingestion streams 86.75 GB plus a complete remote readback.
+# Full global collection has a 300-minute source deadline plus private checkpoint closure.
 # All ordinary jobs retain the stricter three-hour ceiling.
-JOB_TIMEOUT_LIMITS = {('display-basemap-publish.yml', 'archive'): 350}
+JOB_TIMEOUT_LIMITS = {('display-basemap-publish.yml', 'archive'): 350,
+                      ('collect-private-places-full.yml', 'full'): 350}
 
 
 def install_errors(text):
