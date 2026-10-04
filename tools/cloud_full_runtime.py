@@ -2,6 +2,8 @@
 import argparse
 from contextlib import redirect_stdout, redirect_stderr
 import json
+import math
+import os
 import signal
 import sys
 import time
@@ -10,6 +12,18 @@ from cloud_collector_io import Journal
 from cloud_collector_net import cloud_range_class, wrap_collect
 from cloud_full_contract import namespace_spec, assert_lineage_current
 from cloud_full_seed import install_seed
+
+
+def remaining_seconds(spec, now=None):
+    """Account for setup/restore time, leaving twenty minutes before job timeout."""
+    limit = spec['maxMinutes']*60
+    raw = os.environ.get('COLLECTOR_STOP_AT')
+    if raw is None: return limit
+    stop = float(raw); current = time.monotonic() if now is None else now
+    if not math.isfinite(stop) or stop-current > 330*60:
+        raise ValueError('INVALID_STAGE_DEADLINE')
+    if stop-current <= 0: raise Deadline()
+    return max(1, min(limit, math.ceil(stop-current)))
 
 
 def load_code(store, spec, work):
@@ -50,14 +64,15 @@ def collect_full(store, spec, spec_sha, contract, seed, work, execution):
     try: install_seed(journal, seed, regions, index, con, engine.REGISTRY, persist=False)
     finally: con.close()
     merge_caches(store, journal, contract)
-    engine.RangeCache = cloud_range_class(engine.RangeCache, journal, time.monotonic()+spec['maxMinutes']*60)
+    seconds = remaining_seconds(spec)
+    engine.RangeCache = cloud_range_class(engine.RangeCache, journal, time.monotonic()+seconds)
     engine.collect_file = wrap_collect(engine.collect_file, journal)
     output = work/'output'; output.mkdir(exist_ok=True)
     args = argparse.Namespace(output=output, cities=roster, index=index, limit=None, proxy=None,
                               budget=spec['sourceBudgetBytes'], reuse_cache=[], workers=1, themes=['base', 'places'])
     complete, summary, failure = False, None, None
     def expire(*unused): raise Deadline()
-    old = signal.signal(signal.SIGALRM, expire); signal.alarm(spec['maxMinutes']*60)
+    old = signal.signal(signal.SIGALRM, expire); signal.alarm(seconds)
     try:
         with (work/'collector.log').open('w') as log, redirect_stdout(log), redirect_stderr(log):
             summary = engine.run(args)

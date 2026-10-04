@@ -35,6 +35,9 @@ Every workflow job now has an explicit timeout:
 | Ordinary or gap graph setup | 10 min | — |
 | Each ordinary or gap graph build | 180 min | PBF download/filter/extract 30 min |
 | READY publication, including rescue | 15 min | — |
+| Full collector preparation | 30 min | — |
+| Each of six full collector stages | 350 min | Total setup/restore/collection deadline at 330 min |
+| Full collector final acceptance | 30 min | — |
 
 The graph limit is per matrix job, not the total global run. Expiry fails the
 job; no READY or image publication bypass is introduced. Concurrency and the
@@ -42,7 +45,14 @@ production promotion boundary are unchanged.
 
 ## Verification and recurrence guard
 
-`tests/test_ci_install_policy.py` scans Dockerfile and every workflow for scoped
+tools/ci_workflow_policy.py explicitly registers reviewed local composite actions,
+expands their steps for the SDK-ordering gate and centralizes job timeout limits.
+Missing, unknown, escaping, cyclic or non-composite action references fail closed;
+adding an action requires extending the reviewed registry. Composite steps cannot
+hide conditional preparation, an unpinned SDK install or package prompts.
+
+tests/test_ci_install_policy.py scans Dockerfile, every workflow and each registered
+composite action for scoped
 noninteractive installs, rejects global installation ENV/ARG and sudo environment
 loss, and requires bounded job timeouts. Negative controls reproduce the original
 unattended install and settings scoped to `apt-get update` instead of `install`.

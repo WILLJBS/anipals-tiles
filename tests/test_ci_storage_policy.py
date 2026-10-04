@@ -3,8 +3,12 @@ from pathlib import Path
 import re
 import importlib.metadata
 import unittest
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'tools'))
+from ci_workflow_policy import job_steps
+
 REQUIREMENTS = 'tools/storage-requirements.txt'
 STORAGE_WORKFLOWS = {'migrate-release-r2.yml', 'display-basemap-publish.yml',
                      'verify-private-archive.yml', 'collect-private-places.yml',
@@ -26,18 +30,14 @@ def requirement_errors(text):
     return []
 
 
-def storage_errors(text, storage_workflow=False):
+def storage_errors(text, storage_workflow=False, root=ROOT):
     errors = []
-    if '\njobs:\n' not in text:
-        return ['workflow jobs missing']
-    jobs = re.split(r'\n(?=  [\w-]+:\n)', '\n' + text.split('\njobs:\n', 1)[1])
-    for job in jobs:
-        match = re.match(r'\n?  ([\w-]+):\n', job)
-        if not match:
-            continue
-        name = match[1]
+    try:
+        jobs = job_steps(text, root)
+    except ValueError as error:
+        return [('workflow', str(error))]
+    for name, steps in jobs:
         python_ready = sdk_ready = False
-        steps = re.split(r'\n(?=      - )', job)
         for step in steps:
             if not re.match(r'\n?      - ', step):
                 continue

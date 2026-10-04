@@ -22,48 +22,200 @@ on:
       input_bytes:
         description: Exact collector spec byte length
         required: true
+      resume_result:
+        description: Exact terminal prior-result descriptor JSON for an existing namespace
+        required: false
+        default: ''
 permissions:
   contents: read
   actions: read
 concurrency:
   group: private-place-collector
   cancel-in-progress: false
+env:
+  R2_BUCKET: ${{ inputs.bucket }}
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  INPUT_KEY: ${{ inputs.input_key }}
+  INPUT_SHA: ${{ inputs.input_sha }}
+  INPUT_BYTES: ${{ inputs.input_bytes }}
 jobs:
   full:
+    if: ${{ inputs.operation == 'prepare' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_sha }}
           persist-credentials: false
-      - name: Match reviewed dispatch and checkout
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: |
-          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
-          test "$GITHUB_SHA" = "$SOURCE_SHA"
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/full-collector-stage
+        id: stage
         with:
-          python-version: '3.12'
-      - name: Fixed runtime dependencies
-        run: python -m pip install --disable-pip-version-check -r tools/storage-requirements.txt duckdb==1.4.5
-      - name: Offline checkpoint and budget guards
-        run: python -m unittest discover -s tests -p 'test_cloud*.py'
-      - name: Validate actual pilot and run private global collector
-        env:
-          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ inputs.bucket }}
-          GH_TOKEN: ${{ github.token }}
-          OPERATION: ${{ inputs.operation }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          INPUT_KEY: ${{ inputs.input_key }}
-          INPUT_SHA: ${{ inputs.input_sha }}
-          INPUT_BYTES: ${{ inputs.input_bytes }}
-        run: |
-          python tools/cloud_collect_full.py "$OPERATION" --source-sha "$SOURCE_SHA" \
-            --input-key "$INPUT_KEY" --input-sha "$INPUT_SHA" --input-bytes "$INPUT_BYTES"
+          mode: prepare
+          r2-endpoint: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-access-key: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          github-token: ${{ github.token }}
+  stage1:
+    name: collector-stage-1
+    if: ${{ inputs.operation == 'execute' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    outputs:
+      state: ${{ steps.stage.outputs.state }}
+      receipt: ${{ steps.stage.outputs.receipt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/full-collector-stage
+        id: stage
+        with:
+          mode: stage
+          r2-endpoint: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-access-key: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          github-token: ${{ github.token }}
+          stage: '1'
+          previous-result: ${{ inputs.resume_result }}
+  stage2:
+    name: collector-stage-2
+    needs: stage1
+    if: ${{ !cancelled() && needs.stage1.result == 'success' && needs.stage1.outputs.state == 'resume' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    outputs:
+      state: ${{ steps.stage.outputs.state }}
+      receipt: ${{ steps.stage.outputs.receipt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/full-collector-stage
+        id: stage
+        with:
+          mode: stage
+          r2-endpoint: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-access-key: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          github-token: ${{ github.token }}
+          stage: '2'
+          previous-result: ${{ needs.stage1.outputs.receipt }}
+  stage3:
+    name: collector-stage-3
+    needs: stage2
+    if: ${{ !cancelled() && needs.stage2.result == 'success' && needs.stage2.outputs.state == 'resume' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    outputs:
+      state: ${{ steps.stage.outputs.state }}
+      receipt: ${{ steps.stage.outputs.receipt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/full-collector-stage
+        id: stage
+        with:
+          mode: stage
+          r2-endpoint: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-access-key: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          github-token: ${{ github.token }}
+          stage: '3'
+          previous-result: ${{ needs.stage2.outputs.receipt }}
+  stage4:
+    name: collector-stage-4
+    needs: stage3
+    if: ${{ !cancelled() && needs.stage3.result == 'success' && needs.stage3.outputs.state == 'resume' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    outputs:
+      state: ${{ steps.stage.outputs.state }}
+      receipt: ${{ steps.stage.outputs.receipt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/full-collector-stage
+        id: stage
+        with:
+          mode: stage
+          r2-endpoint: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-access-key: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          github-token: ${{ github.token }}
+          stage: '4'
+          previous-result: ${{ needs.stage3.outputs.receipt }}
+  stage5:
+    name: collector-stage-5
+    needs: stage4
+    if: ${{ !cancelled() && needs.stage4.result == 'success' && needs.stage4.outputs.state == 'resume' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    outputs:
+      state: ${{ steps.stage.outputs.state }}
+      receipt: ${{ steps.stage.outputs.receipt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/full-collector-stage
+        id: stage
+        with:
+          mode: stage
+          r2-endpoint: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-access-key: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          github-token: ${{ github.token }}
+          stage: '5'
+          previous-result: ${{ needs.stage4.outputs.receipt }}
+  stage6:
+    name: collector-stage-6
+    needs: stage5
+    if: ${{ !cancelled() && needs.stage5.result == 'success' && needs.stage5.outputs.state == 'resume' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    outputs:
+      state: ${{ steps.stage.outputs.state }}
+      receipt: ${{ steps.stage.outputs.receipt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/full-collector-stage
+        id: stage
+        with:
+          mode: stage
+          r2-endpoint: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-access-key: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          github-token: ${{ github.token }}
+          stage: '6'
+          previous-result: ${{ needs.stage5.outputs.receipt }}
+  finalize:
+    needs: [stage1, stage2, stage3, stage4, stage5, stage6]
+    if: ${{ always() && !cancelled() && inputs.operation == 'execute' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/full-collector-stage
+        id: stage
+        with:
+          mode: finalize
+          r2-endpoint: ${{ secrets.R2_ENDPOINT_URL }}
+          r2-access-key: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          github-token: ${{ github.token }}
+          final-results: ${{ toJSON(needs) }}
 # Private source/code/checkpoints/results never become Actions artifacts.

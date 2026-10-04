@@ -64,12 +64,16 @@ def prepare(store, request, work):
             'privateSpec': save(store, work, 'spec.json', spec)}
 
 
-def resume(store, spec, spec_sha, work, context):
+def validate_full(spec):
     if (spec.get('schema') != 'anipals-cloud-collector-v1' or spec.get('mode') != 'full'
             or spec.get('globalScopeCount') != 6222 or spec.get('workers') != 1
             or spec.get('themes') != ['base', 'places'] or spec.get('publicationsAllowed') is not False
             or type(spec.get('maxMinutes')) is not int or not 1 <= spec['maxMinutes'] <= 300):
         raise ValueError('EXACT_GLOBAL_CONFIGURATION_REQUIRED')
+
+
+def resume(store, spec, spec_sha, work, context):
+    validate_full(spec)
     contract = blob_json(store, spec['contract'])
     request = {'seed': contract['seed'], 'seedArchiveReceipt': contract['seedArchiveReceipt'],
                'pilotResults': [p['result'] for p in contract['verifiedPilotProofs']]}

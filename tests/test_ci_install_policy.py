@@ -2,14 +2,11 @@
 from pathlib import Path
 import re
 import unittest
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-# Large official archive ingestion streams 86.75 GB plus a complete remote readback.
-# Full global collection has a 300-minute source deadline plus private checkpoint closure.
-# All ordinary jobs retain the stricter three-hour ceiling.
-JOB_TIMEOUT_LIMITS = {('display-basemap-publish.yml', 'archive'): 350,
-                      ('collect-private-places-full.yml', 'full'): 350,
-                      ('native-r2-acceptance.yml', 'native'): 25}
+sys.path.insert(0, str(ROOT/'tools'))
+from ci_workflow_policy import JOB_TIMEOUT_LIMITS, job_timeouts, timeout_errors, reviewed_composites
 
 
 def install_errors(text):
@@ -28,17 +25,10 @@ def install_errors(text):
     return errors
 
 
-def job_timeouts(text):
-    jobs = text.split('\njobs:\n', 1)[1]
-    chunks = re.split(r'\n(?=  [a-zA-Z][\w-]*:\n)', '\n' + jobs)
-    return [(re.match(r'  ([\w-]+):', block)[1],
-             re.findall(r'^    timeout-minutes: (\d+)\s*$', block, re.M))
-            for block in chunks if re.match(r'  [\w-]+:', block)]
-
 
 class CiInstallPolicyTests(unittest.TestCase):
     def test_all_package_installs_are_scoped_and_unattended(self):
-        paths = [ROOT/'deploy/Dockerfile', ROOT/'tests/Dockerfile.native-r2', *(ROOT/'.github/workflows').glob('*.yml')]
+        paths = [ROOT/'deploy/Dockerfile', ROOT/'tests/Dockerfile.native-r2', *(ROOT/'.github/workflows').glob('*.yml'), *reviewed_composites(ROOT)]
         for path in paths:
             with self.subTest(path=path.name):
                 self.assertEqual(install_errors(path.read_text()), [])

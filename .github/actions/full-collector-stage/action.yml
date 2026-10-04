@@ -1,0 +1,73 @@
+name: Private full collector stage
+description: Fixed setup and fail-closed finite continuation
+inputs:
+  mode:
+    description: prepare, stage, or finalize
+    required: true
+  stage:
+    description: Finite stage index
+    default: ''
+  previous-result:
+    description: Exact predecessor private receipt
+    default: ''
+  final-results:
+    description: GitHub needs context for final acceptance
+    default: ''
+  r2-endpoint:
+    description: Private object endpoint
+    required: true
+  r2-access-key:
+    description: Private object access credential
+    required: true
+  r2-secret-key:
+    description: Private object signing credential
+    required: true
+  github-token:
+    description: Read-only actual job proof credential
+    required: true
+outputs:
+  state:
+    description: complete, resume, or exhausted
+    value: ${{ steps.run.outputs.state }}
+  receipt:
+    description: Exact private result descriptor
+    value: ${{ steps.run.outputs.receipt }}
+runs:
+  using: composite
+  steps:
+    - name: Match reviewed dispatch and checkout
+      shell: bash
+      run: |
+        [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+        test "$GITHUB_SHA" = "$SOURCE_SHA"
+        test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+        python3 -c 'import os,time; open(os.environ["GITHUB_ENV"],"a").write("COLLECTOR_STOP_AT="+str(time.monotonic()+330*60)+"\n")'
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Fixed runtime dependencies
+      shell: bash
+      run: python -m pip install --disable-pip-version-check -r tools/storage-requirements.txt duckdb==1.4.5
+    - name: Offline checkpoint and budget guards
+      shell: bash
+      run: python -m unittest discover -s tests -p 'test_cloud*.py'
+    - name: Execute bounded collector stage
+      id: run
+      shell: bash
+      env:
+        R2_ENDPOINT_URL: ${{ inputs.r2-endpoint }}
+        R2_ACCESS_KEY_ID: ${{ inputs.r2-access-key }}
+        R2_SECRET_ACCESS_KEY: ${{ inputs.r2-secret-key }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        MODE: ${{ inputs.mode }}
+        STAGE: ${{ inputs.stage }}
+        PREVIOUS_RESULT: ${{ inputs.previous-result }}
+        FINAL_RESULTS: ${{ inputs.final-results }}
+      run: |
+        common=(--source-sha "$SOURCE_SHA" --input-key "$INPUT_KEY" --input-sha "$INPUT_SHA" --input-bytes "$INPUT_BYTES")
+        case "$MODE" in
+          prepare) python tools/cloud_collect_full.py prepare "${common[@]}" ;;
+          stage) python tools/cloud_full_stage.py --mode stage "${common[@]}" --stage "$STAGE" --previous-result "$PREVIOUS_RESULT" ;;
+          finalize) python tools/cloud_full_stage.py --mode finalize "${common[@]}" --final-results "$FINAL_RESULTS" ;;
+          *) exit 1 ;;
+        esac
