@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+from native_scope_geometry import distance, point, route_geometry
 
 
 def require(ok, code):
@@ -93,6 +94,11 @@ class Counter:
 
 def route_pair(engine, region, payload, counter, bridge):
     records, shapes = [], []
+    requested = payload.get('locations', [])
+    require(len(requested) == 2 and all(point(p) is not None for p in requested),
+            'NATIVE_ENDPOINT_REQUEST_INVALID')
+    endpoint_limit = min(500, distance(point(requested[0]), point(requested[1])) / 4)
+    require(endpoint_limit > 0, 'NATIVE_ENDPOINT_REQUEST_INVALID')
     for temperature in ('cold', 'hot'):
         before, start = counter.snapshot(), time.monotonic()
         result = engine.request(region, 'route', payload)
@@ -105,12 +111,19 @@ def route_pair(engine, region, payload, counter, bridge):
                 'NATIVE_ROUTE_OR_BOUNDS_FAILED')
         shape = [leg['shape'] for leg in trip['legs']]
         require(shape and all(isinstance(s, str) and s for s in shape), 'NATIVE_GEOMETRY_MISSING')
+        geometry = route_geometry(result, requested)
+        require(geometry.get('geometry_status') == 'decoded_polyline6'
+                and geometry['shape_point_count'] >= 2 and not geometry['same_shape_endpoint']
+                and geometry['start_offset_m'] <= endpoint_limit
+                and geometry['end_offset_m'] <= endpoint_limit, 'NATIVE_ENDPOINT_CORRELATION_FAILED')
         delta = tuple(a-b for a, b in zip(after, before))
         require((delta[0] > 0 and delta[1] > 0 and delta[2] > 0) if temperature == 'cold'
                 else delta == (0, 0, 0), 'COLD_NOT_R2_OR_HOT_SOURCE_IO')
         shapes.append((length, shape))
         records.append(dict(cache=temperature, http_gets=delta[0], object_fetches=delta[1],
-                            source_bytes=delta[2], elapsed_ms=round(elapsed*1000), distance_km=length))
+                            source_bytes=delta[2], elapsed_ms=round(elapsed*1000), distance_km=length,
+                            start_offset_m=geometry['start_offset_m'], end_offset_m=geometry['end_offset_m'],
+                            endpoint_limit_m=endpoint_limit))
     require(shapes[0] == shapes[1], 'COLD_HOT_ROUTE_DIFFERS')
     return records
 

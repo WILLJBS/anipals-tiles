@@ -53,6 +53,17 @@ The native status action must report 3.3.0 without warming tile cache. A fresh 5
 
 Local markers and leases live only in a fresh diagnostic temporary directory; no production graph is activated. The container is uniquely named and removed in a finally block, including when the Docker client times out. Candidate build, diagnostic build, native execution and cleanup are bounded to 600/300/180/30 seconds; workflow step/job ceilings are 20/25 minutes. Failed checks remain failures; there is no relaxed retry route or no-route fallback.
 
+The gate also decodes actual polyline6 endpoints with the shared
+`native_scope_geometry` implementation. Each endpoint must be within
+`min(500 metres, requested origin-to-destination distance / 4)` of its request;
+collapsed endpoints and malformed geometry fail even if the native summary says
+the route has positive length. Private records retain numeric offsets and the
+limit, not coordinates or shapes. This uses the existing short-probe acceptance
+rule, not a changed native snapping radius. Earlier cold/hot receipts without
+these fields establish transport/cache behavior only; they must be rerun before
+claiming this strengthened endpoint acceptance. Offline negative controls
+reproduce distant but otherwise valid short routes passing the former gate.
+
 ## Private result and public output
 
 On completion or an execution failure, the host writes a bounded private log tail (up to 512KiB with full-byte-count/truncation fields) and a result to `navigation/native-acceptance/<request-sha>/{logs,results}/<content-sha>.json`. Existing `PrivateStore.save_json` performs conditional immutable writes and full GET/SHA verification. Full native result, request descriptor, GitHub identity and phase/error class remain in that private result. If the request is invalid, no execution starts; if private result publication fails, the workflow fails without claiming completion.

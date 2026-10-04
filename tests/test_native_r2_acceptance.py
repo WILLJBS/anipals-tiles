@@ -13,6 +13,7 @@ sys.path[:0] = [str(ROOT/'tools'), str(ROOT/'deploy')]
 from regional_release import canonical_hash
 from migration_contract import migration_identity
 from native_r2_acceptance import Counter, probe_payload, route_pair, verify_manifest, verify_receipt
+from test_native_scope_geometry import encode
 
 
 class GateTests(unittest.TestCase):
@@ -114,9 +115,11 @@ class GateTests(unittest.TestCase):
                 if (self.calls == 1 and cold_io) or (self.calls == 2 and hot_io):
                     counter.before_send()
                     list(counter.tile_reader(lambda _: [b'verified'], 'test/', {'tile': {}})('test/tile'))
+                points = [(0, 0), (.0001, .001), (0, .002)] if self.calls == 2 and hot_shape else [(0, 0), (0, .002)]
                 return dict(trip=dict(units='kilometers', summary=dict(length=0.25),
-                                      legs=[dict(shape='changed' if self.calls == 2 and hot_shape else 'shape')]))
-        return route_pair(FakeEngine(), {}, {}, counter, SimpleNamespace(failures=bridge_failures))
+                                      legs=[dict(shape=encode(points))]))
+        payload = dict(locations=[dict(lat=0, lon=0), dict(lat=0, lon=.002)])
+        return route_pair(FakeEngine(), {}, payload, counter, SimpleNamespace(failures=bridge_failures))
 
     def test_cold_get_hot_zero_counted(self):
         records = self.pair()
