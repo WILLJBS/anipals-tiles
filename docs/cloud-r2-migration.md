@@ -175,8 +175,9 @@ assets, READY and the complete registered roster are validated **before** this
 filter is applied. The filter changes only the migration matrix; it does not
 change the complete source contract or any receipt identity.
 
-A nonempty subset uses the fixed `migrate-release-tiles-to-r2-recovery`
-concurrency group. A blank subset retains `migrate-release-tiles-to-r2`. Thus one
+With the default `queue_lane=auto`, a nonempty subset uses the fixed
+`migrate-release-tiles-to-r2-recovery` group; a blank subset retains
+`migrate-release-tiles-to-r2`. Thus one
 recovery cannot replace the pending complete-release run in GitHub's
 one-running/one-pending concurrency slot. Operators must still select regions
 whose old jobs have finished or failed, and avoid superseding another pending
@@ -185,3 +186,20 @@ source SHA and retains its new private receipt. Scope logs explicitly report
 both validated and selected region counts and mark `subset`; there is no
 full-roster completion marker. Old successful receipts are preserved under
 their original SHA and contract; a recovery is not proof for unselected regions.
+
+### Upgrade an unfinished queue without redoing completed regions
+
+Explicit `queue_lane=primary` or `recovery` changes only placement in the two
+existing groups. It does not change the four-region concurrency, three-hour
+deadline, source validation, subset selection, byte verification, pilot
+requirement, or receipt identity. `auto` preserves previous dispatch behavior.
+Use this when an old matrix still runs an obsolete uploader while a useful
+single-region recovery runs in the other queue. First archive exact job states
+and completed receipts; cancel/reconcile superseded pending runs and the old
+active matrix, then dispatch only unfinished slugs to its now-vacant primary
+queue. Preserve any active recovery slug outside that subset. Requeue a displaced
+source contract explicitly on the new verified revision; never silently lose it.
+Previously uploaded objects remain immutable and require full GET/SHA checks
+on reuse. Source tar input may be read again; no source or runtime pointer is
+removed. A cancelled matrix is not success, and its successful regional jobs
+retain their original receipts rather than inheriting the replacement identity.

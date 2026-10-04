@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -50,7 +51,18 @@ class MigrationSubsetTests(unittest.TestCase):
 
     def test_workflow_full_group_preserved_recovery_isolated_and_inputs_are_env_only(self):
         workflow=(ROOT/'.github/workflows/migrate-release-r2.yml').read_text()
-        self.assertIn("group: ${{ inputs.region_subset != '' && 'migrate-release-tiles-to-r2-recovery' || 'migrate-release-tiles-to-r2' }}",workflow)
+        # Exercise the actual expression for legacy callers and both explicit lanes.
+        line=next(line.strip() for line in workflow.splitlines() if line.strip().startswith('group:'))
+        expression=line.removeprefix('group: ${{ ').removesuffix(' }}').replace('&&','and').replace('||','or')
+        primary='migrate-release-tiles-to-r2';recovery=primary+'-recovery'
+        for lane in (None,'','auto','primary','recovery'):
+            for subset in ('','["russia"]'):
+                wanted=primary if lane=='primary' or lane!='recovery' and not subset else recovery
+                actual=eval(expression,{'__builtins__':{}},{'inputs':SimpleNamespace(queue_lane=lane,region_subset=subset)})
+                self.assertEqual(actual,wanted,(lane,subset))
+        self.assertIn('options: [auto, primary, recovery]',workflow)
+        self.assertIn('case "$QUEUE_LANE" in auto|primary|recovery)',workflow)
+        self.assertIn('max-parallel: 4',workflow)
         self.assertIn('cancel-in-progress: false',workflow)
         self.assertIn('REGION_SUBSET: ${{ inputs.region_subset }}',workflow)
         self.assertEqual(workflow.count('--region-subset "$REGION_SUBSET" prepare'),2)

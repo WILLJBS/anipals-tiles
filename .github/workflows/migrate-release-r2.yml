@@ -27,6 +27,11 @@ on:
         description: 'Recovery only: JSON array of exact slugs; blank migrates complete roster'
         required: false
         default: ''
+      queue_lane:
+        description: 'Queue only; auto preserves existing full/recovery placement'
+        type: choice
+        options: [auto, primary, recovery]
+        default: auto
       pilot_region:
         description: 'Pilot slug in this contract; gap3 uses central-america'
         required: true
@@ -34,7 +39,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ${{ inputs.region_subset != '' && 'migrate-release-tiles-to-r2-recovery' || 'migrate-release-tiles-to-r2' }}
+  group: ${{ (inputs.queue_lane == 'primary' || (inputs.queue_lane != 'recovery' && inputs.region_subset == '')) && 'migrate-release-tiles-to-r2' || 'migrate-release-tiles-to-r2-recovery' }}
   cancel-in-progress: false
 env:
   R2_BUCKET: ${{ inputs.bucket }}
@@ -52,6 +57,11 @@ jobs:
       receipt_sha: ${{ steps.receipt.outputs.sha256 }}
       receipt_size: ${{ steps.receipt.outputs.size }}
     steps:
+      - name: Validate explicit queue placement
+        env:
+          QUEUE_LANE: ${{ inputs.queue_lane || 'auto' }}
+        run: |
+          case "$QUEUE_LANE" in auto|primary|recovery) ;; *) exit 1 ;; esac
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_sha }}
