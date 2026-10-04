@@ -10,7 +10,8 @@ separate source-archive namespace.
 
 The workflow must be registered on the default branch and run at a reviewed
 revision. Inputs are the exact 40-character `source_sha`, `release_tag`, authorized
-`bucket`, `contract`, `mode` (`pilot` or `full`), and an exact `pilot_region` slug. Defaults
+`bucket`, `contract`, `mode` (`pilot` or `full`), an exact `pilot_region` slug,
+and optional `region_subset` JSON. A blank subset retains the complete roster. Defaults
 select the original release and Canada; another original region can be chosen.
 Select `contract=original61` (default), `gap3`, or `additions129`. The release
 must contain the complete registered roster and READY; a partial draft is
@@ -43,9 +44,11 @@ tile against its source/ABI/cross-references, and fully GET-verifies twenty R2
 objects. Only then does it upload its receipt to private R2 and GET-verify that
 receipt. In `pilot` mode no full migration jobs run.
 
-In `full` mode, the successful pilot supplies the exact registered regional matrix. At
-most four regions run concurrently, retaining one authenticated shard and one
-tile per runner. Each region rereads and revalidates source metadata, downloads
+In `full` mode, the successful pilot supplies the complete registered regional
+matrix, or the explicitly selected recovery subset. At most four regions run
+concurrently. Each runner retains one authenticated source
+shard, one current extracted tile, and a bounded queue of independently owned
+tile files (see the upload bounds below). Each region rereads and revalidates source metadata, downloads
 the pilot receipt by immutable SHA/size, and checks its schema, bucket and count.
 The original migrator then rechecks the exact source contract. A changed release
 cannot borrow a pilot receipt from another source contract.
@@ -102,3 +105,83 @@ All tile, display and private-receipt publishers read SDK metadata through
 and fails closed; it never authorizes object creation or conflict reuse.
 Only recognized protocol error codes may enter logs. A conflict still requires
 complete object GET/SHA validation. Transport failure is never treated as 404.
+
+
+## Bounded tile publication and progress
+
+The two-pass source and structural checks remain mandatory. The producer walks
+and validates tiles sequentially against the complete authenticated header
+inventory, then transfers each validated file into a separate upload directory.
+Eight worker threads publish independent objects. Running and waiting files
+share a **512 MiB disk budget**, with at most sixteen outstanding files. The
+producer blocks until a completed worker releases capacity; it cannot reuse a
+worker's file as the tar reader's next `current.gph`.
+
+Capacity checks reserve the next source part plus 640 MiB for the current tile
+(maximum 512 MiB) and safety margin, plus the entire 512 MiB upload queue budget.
+The queue budget is not an in-memory buffer: each GET verifier reads 1 MiB at a
+time. Tar cleanup and upload cleanup own separate directories. On producer or
+worker failure, queued tasks are canceled, running tasks finish before their
+files are removed, and no regional manifest or receipt is published. Already
+verified content-addressed tiles remain available for a later validated retry.
+
+The S3 client is created before the workers and shared without mutating its
+metadata or event hooks; this follows the
+[Boto3 client thread-safety contract](https://docs.aws.amazon.com/boto3/latest/guide/clients.html#multithreading-or-multiprocessing-with-clients).
+Publisher counters use a lock. Every existing object still requires complete
+GET/size/SHA verification before reuse. Every new object still requires
+conditional PUT and complete GET/size/SHA verification. Only after every tile
+succeeds can the main thread publish the regional manifest. The change does not
+raise workflow timeouts or relax any source, ABI, cross-reference or hash gate.
+
+Structured events identify source part authentication, inventory count/bytes,
+upload start/progress/completion and structure completion. Upload progress
+reports completed count/bytes, pending count/disk bytes, peak bounds and elapsed
+time. Publisher metrics count verify and PUT method calls (not individual SDK
+retry attempts), successful verified/uploaded bytes, and cumulative operation
+milliseconds across workers. These cumulative durations are not wall time.
+Progress is emitted at phase boundaries and roughly five-second collection
+intervals; source download and individual structural validation emit on return.
+
+### Recovery and completion boundaries
+
+A timed-out region has no completion receipt merely because some tile keys
+exist. A retry rechecks the complete source and structure, fully GET-verifies
+existing objects and uploads missing objects; it cannot replace the SHA gate
+with a key listing. Do not cancel other regions that are still finishing.
+A recovery run must use a fresh pilot bound to its reviewed source revision.
+Previously successful regional receipts retain their original source revision
+and contract. Never rewrite old receipts to make them appear produced by new
+code. A combined completion ledger must verify each original receipt and its
+source/graph/manifest identity, with exact coverage of the registered roster;
+a successful single-region recovery alone is not a complete release migration.
+
+For regions that still exceed the bounded job lifetime after concurrency is
+measured, the next architecture is deterministic object shards derived from the
+full authenticated inventory, bounded by both object count and bytes. Each shard
+must retain complete cross-reference inventory checks and report its exact
+verified subset. A final reducer may publish the regional manifest only after
+proving disjoint, exact coverage and matching source/graph identities. This
+sharding/reducer path is not implemented by the upload queue and must not be
+claimed as completed recovery support.
+
+
+### Explicit recovery matrix
+
+`region_subset` may be an explicit nonempty JSON array of distinct exact slugs,
+for example `["russia"]` for the registered original-release region. Unknown
+slugs, duplicates, empty arrays and malformed JSON fail closed. All source
+assets, READY and the complete registered roster are validated **before** this
+filter is applied. The filter changes only the migration matrix; it does not
+change the complete source contract or any receipt identity.
+
+A nonempty subset uses the fixed `migrate-release-tiles-to-r2-recovery`
+concurrency group. A blank subset retains `migrate-release-tiles-to-r2`. Thus one
+recovery cannot replace the pending complete-release run in GitHub's
+one-running/one-pending concurrency slot. Operators must still select regions
+whose old jobs have finished or failed, and avoid superseding another pending
+recovery. Every recovery repeats the twenty-tile pilot at its new reviewed
+source SHA and retains its new private receipt. Scope logs explicitly report
+both validated and selected region counts and mark `subset`; there is no
+full-roster completion marker. Old successful receipts are preserved under
+their original SHA and contract; a recovery is not proof for unselected regions.

@@ -72,7 +72,9 @@ def main():
     for plan in selected:
         slug = plan['slug']
         print(json.dumps(dict(event='region_inventory_started', region=slug)), flush=True)
-        tiles, headers = inventory(plan, work)
+        def progress(event):
+            print(json.dumps(dict(region=slug, **publisher.metrics(), **event)), flush=True)
+        tiles, headers = inventory(plan, work, progress=progress)
         graph = canonical_hash({path: item['sha256'] for path, item in tiles.items()})
         expected_graph = ready.get('region_manifests', {}).get(slug, {}).get('graph_fingerprint')
         if expected_graph is not None and graph != expected_graph:
@@ -81,7 +83,7 @@ def main():
         def upload(relative, path, item):
             publisher.put(prefix + 'tiles/' + relative, path, item)
         before_upload, before_reuse = publisher.uploaded, publisher.reused
-        result = migrate(plan, work, tiles, headers, upload, limit=20 if args.mode == 'pilot' else None)
+        result = migrate(plan, work, tiles, headers, upload, limit=20 if args.mode == 'pilot' else None, progress=progress)
         if args.mode == 'pilot':
             if result['tiles'] != 20:
                 raise ValueError('pilot region has fewer than 20 validated tiles; choose a larger region')

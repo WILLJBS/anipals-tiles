@@ -23,6 +23,10 @@ on:
         type: choice
         options: [pilot, full]
         default: pilot
+      region_subset:
+        description: 'Recovery only: JSON array of exact slugs; blank migrates complete roster'
+        required: false
+        default: ''
       pilot_region:
         description: 'Pilot slug in this contract; gap3 uses central-america'
         required: true
@@ -30,13 +34,14 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: migrate-release-tiles-to-r2
+  group: ${{ inputs.region_subset != '' && 'migrate-release-tiles-to-r2-recovery' || 'migrate-release-tiles-to-r2' }}
   cancel-in-progress: false
 env:
   R2_BUCKET: ${{ inputs.bucket }}
   SOURCE_SHA: ${{ inputs.source_sha }}
   RELEASE_TAG: ${{ inputs.release_tag }}
   MIGRATION_CONTRACT: ${{ inputs.contract }}
+  REGION_SUBSET: ${{ inputs.region_subset }}
   GH_TOKEN: ${{ github.token }}
 jobs:
   pilot:
@@ -59,7 +64,7 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
       - id: source
         name: Pin exact complete release with all asset pages
-        run: python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" prepare
+        run: python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" --region-subset "$REGION_SUBSET" prepare
       - name: Verify twenty actual tiles in private R2
         env:
           PILOT_REGION: ${{ inputs.pilot_region }}
@@ -103,7 +108,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" prepare
+          python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" --region-subset "$REGION_SUBSET" prepare
           python3 tools/migration_ci.py --contract "$MIGRATION_CONTRACT" --source-sha "$SOURCE_SHA" --tag "$RELEASE_TAG" --work "$RUNNER_TEMP/migration" fetch-pilot --sha256 "$PILOT_SHA" --size "$PILOT_SIZE"
       - name: Stream one isolated region through structural and R2 GET gates
         env:

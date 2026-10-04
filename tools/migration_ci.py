@@ -49,7 +49,22 @@ def fetch(url, token=None, limit=16*1024*1024):
             time.sleep(2)
 
 
-def prepare(tag, work, contract_name='original61', source_sha=None):
+def select_regions(regions, raw):
+    """Filter only an already validated complete roster; blank means all."""
+    if raw == '':
+        return regions
+    try:
+        selected = json.loads(raw)
+    except (TypeError, ValueError):
+        raise ValueError('region subset must be an explicit JSON array') from None
+    if (not isinstance(selected, list) or not selected or len(selected) > len(regions)
+            or any(not isinstance(slug, str) or slug not in regions for slug in selected)
+            or len(set(selected)) != len(selected)):
+        raise ValueError('region subset must contain distinct exact registered slugs')
+    return [slug for slug in regions if slug in selected]
+
+
+def prepare(tag, work, contract_name='original61', source_sha=None, region_subset=''):
     if not TAG.fullmatch(tag):
         raise ValueError('explicit release tag required')
     token = os.environ.get('GH_TOKEN')
@@ -75,12 +90,15 @@ def prepare(tag, work, contract_name='original61', source_sha=None):
     profile = load_profile(contract_name)
     plans = validate_profile_supply(profile, release, ready)
     bound = source_contract(profile, source_sha) if source_sha is not None else None
+    selected = select_regions([plan['slug'] for plan in plans], region_subset)
     work.mkdir(parents=True, exist_ok=True)
     (work/'release.json').write_text(json.dumps(release))
     (work/'READY').write_bytes(ready)
     if bound is not None:
         (work/'source-contract.json').write_text(json.dumps(bound, sort_keys=True))
-    return [plan['slug'] for plan in plans]
+    print(json.dumps(dict(event='migration_scope_validated', validated_regions=len(plans),
+                         selected_regions=len(selected), scope='subset' if region_subset else 'full')))
+    return selected
 
 
 def receipt_key(source_sha, tag, name, digest):
@@ -148,6 +166,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-sha', required=True)
     parser.add_argument('--contract', default='original61')
+    parser.add_argument('--region-subset', default='', help='JSON exact slugs; empty string keeps complete roster')
     parser.add_argument('--tag', required=True)
     parser.add_argument('--work', type=Path, required=True)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -159,8 +178,8 @@ def main():
     args = parser.parse_args()
     source_revision(args.source_sha)
     if args.command == 'prepare':
-        regions = prepare(args.tag, args.work, args.contract, args.source_sha)
-        outputs(dict(regions=regions)); print(json.dumps(dict(validated_regions=len(regions))))
+        regions = prepare(args.tag, args.work, args.contract, args.source_sha, args.region_subset)
+        outputs(dict(regions=regions))
     elif args.command == 'publish-receipt':
         result = publish_receipt(args.source_sha, args.tag, args.file, args.name)
         outputs(result); print(json.dumps(dict(event='private_receipt_GET_verified', sha256=result['sha256'])))
