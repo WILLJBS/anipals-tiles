@@ -1,0 +1,7 @@
+# Diagnostic layer only. Build the exact production candidate first; never push.
+ARG CANDIDATE_IMAGE
+FROM ${CANDIDATE_IMAGE}
+RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y -qq --no-install-recommends git python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+COPY tools/storage-requirements.txt /tmp/storage-requirements.txt
+RUN python3 -m pip install --disable-pip-version-check --target /opt/diagnostic-sdk -r /tmp/storage-requirements.txt

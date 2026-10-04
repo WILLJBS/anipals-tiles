@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # Full global collection has a 300-minute source deadline plus private checkpoint closure.
 # All ordinary jobs retain the stricter three-hour ceiling.
 JOB_TIMEOUT_LIMITS = {('display-basemap-publish.yml', 'archive'): 350,
-                      ('collect-private-places-full.yml', 'full'): 350}
+                      ('collect-private-places-full.yml', 'full'): 350,
+                      ('native-r2-acceptance.yml', 'native'): 25}
 
 
 def install_errors(text):
@@ -37,7 +38,7 @@ def job_timeouts(text):
 
 class CiInstallPolicyTests(unittest.TestCase):
     def test_all_package_installs_are_scoped_and_unattended(self):
-        paths = [ROOT/'deploy/Dockerfile', *(ROOT/'.github/workflows').glob('*.yml')]
+        paths = [ROOT/'deploy/Dockerfile', ROOT/'tests/Dockerfile.native-r2', *(ROOT/'.github/workflows').glob('*.yml')]
         for path in paths:
             with self.subTest(path=path.name):
                 self.assertEqual(install_errors(path.read_text()), [])
