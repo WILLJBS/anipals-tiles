@@ -1,21 +1,23 @@
 import hashlib
 import io
+import json
+from urllib.error import HTTPError
 import unittest
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from display_archive import transfer, read_range, SOURCE
+from display_archive import transfer, read_range, SOURCE, USER_AGENT, source_preflight, failure_details
 class Missing(Exception):
     response = {'Error': {'Code': '404'}}
 
 
 class Store:
     def __init__(self, corrupt=False):
-        self.parts = [];self.completed = False;self.aborted = False;self.corrupt = corrupt
+        self.created = False;self.parts = [];self.completed = False;self.aborted = False;self.corrupt = corrupt
     def head_object(self, **args):
         raise Missing()
     def create_multipart_upload(self, **args):
-        self.metadata = args['Metadata'];return {'UploadId': 'fixture'}
+        self.created = True;self.metadata = args['Metadata'];return {'UploadId': 'fixture'}
     def upload_part(self, **args):
         self.parts.append(args['Body']);return {'ETag': str(args['PartNumber'])}
     def complete_multipart_upload(self, **args):
@@ -28,6 +30,53 @@ class Store:
 
 
 class Streaming(unittest.TestCase):
+    def test_identified_source_client_retains_strict_range_headers(self):
+        class Response(io.BytesIO):
+            status = 206
+            headers = {'Content-Range': 'bytes 0-2/3'}
+            def geturl(self): return SOURCE
+        def opener(request, **kwargs):
+            self.assertEqual(request.get_header('User-agent'), USER_AGENT)
+            self.assertEqual(request.get_header('Range'), 'bytes=0-2')
+            self.assertEqual(request.get_header('Accept-encoding'), 'identity')
+            return Response(b'abc')
+        self.assertEqual(read_range(0, 2, 3, opener=opener), b'abc')
+
+    def test_actual_http_error_is_redacted_with_stage_status_and_bounded_retries(self):
+        calls, waits, bodies = [], [], []
+        def denied(*args, **kwargs):
+            calls.append(1); body = io.BytesIO(b'private upstream body'); bodies.append(body)
+            raise HTTPError('https://private.invalid/?token=secret', 403, 'secret response', {}, body)
+        with self.assertRaises(HTTPError) as failure:
+            read_range(0, 2, 3, opener=denied, sleep=waits.append)
+        details = failure_details(failure.exception)
+        self.assertEqual((len(calls), waits), (3, [2, 2]))
+        self.assertTrue(all(body.closed for body in bodies))
+        self.assertEqual(details['stage'], 'source_range'); self.assertEqual(details['http_status'], 403)
+        self.assertNotIn('secret', json.dumps(details)); self.assertNotIn('private', json.dumps(details))
+        self.assertEqual(failure_details(ValueError('private token'))['reason'], 'BASEMAP_TRANSFER_FAILED')
+
+    def test_preflight_validates_header_before_any_multipart_creation(self):
+        for body in (b'bad', b'PMTiles\x02'+b'0'*119):
+            store=Store()
+            with self.assertRaisesRegex(ValueError, 'SOURCE_PMTILES_HEADER'):
+                transfer(store, 'fixture', preflight=lambda: source_preflight(lambda *args: body))
+            self.assertFalse(store.created); self.assertEqual(store.parts, [])
+        body=b'PMTiles\x03'+b'0'*119
+        proof=source_preflight(lambda *args: body)
+        self.assertEqual(proof['rangeBytes'], 127)
+
+    def test_preflight_network_failure_is_before_write_and_upload_failure_keeps_stage(self):
+        store=Store()
+        def denied(): raise HTTPError('https://private.invalid', 403, 'private', {}, None)
+        with self.assertRaises(HTTPError) as failure: transfer(store, 'fixture', preflight=denied)
+        self.assertFalse(store.created); self.assertEqual(failure_details(failure.exception)['stage'], 'source_preflight')
+        def upload(**kwargs): raise RuntimeError('private token')
+        store.upload_part=upload
+        with self.assertRaises(RuntimeError) as failure:
+            transfer(store, 'fixture', size=3, sha256='a'*64, reader=lambda *args:b'abc')
+        self.assertTrue(store.aborted); self.assertEqual(failure_details(failure.exception)['stage'], 'r2_part_upload')
+
     def test_hash_before_complete_and_full_readback(self):
         raw = b'abcdef';store = Store()
         result = transfer(store, 'fixture', size=6, part_size=3, sha256=hashlib.sha256(raw).hexdigest(),

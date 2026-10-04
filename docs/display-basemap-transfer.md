@@ -25,6 +25,11 @@ repository's `services/basemap-worker/README.md` and `docs/display-basemap-r2.md
 
 ## Transfer and completion
 
+Before creating a new multipart upload, the tool verifies the pinned 127-byte
+PMTiles v3 header through the same strict HTTP Range reader. The reader sends
+an honest `AniPals-Archive/1.0 (+https://anipals.app)` User-Agent. An existing R2
+object is still fully GET-verified without depending on upstream availability.
+
 The tool validates each sequential 64 MiB HTTP Range: exact source after
 redirect handling, status 206, Content-Range including fixed total size, exact
 length, and identity content encoding. Three attempts, two seconds apart, apply
@@ -55,7 +60,34 @@ must pass first.
 
 Local tests cover successful full source/readback SHA, malformed HTTP ranges,
 truncation, changed source, full SHA mismatch, conditional-winner integrity and
-abort/interruption handling. The cloud workflow and real R2 conditional multipart
-completion have not run as part of this local implementation. No Worker release
+abort/interruption handling. The first cloud attempt failed at source HTTP retrieval without completing
+publication; the fixed reader has passed a real 127-byte source preflight.
+Complete cloud multipart publication and full R2 readback remain pending. No Worker release
 or production switch is implied. Receipts are uploaded as workflow artifacts;
 secrets remain scoped to the transfer step and are never written to receipts.
+
+
+## Source-client rejection diagnosed 2026-10-04
+
+Cloud run `37208856142`, job `111455712066`, failed in six seconds with
+`HTTPError` and `multipart_abort_failed=false`. In that revision the only
+urllib call in the transfer was source Range retrieval; R2 calls use botocore.
+The old diagnostic omitted HTTP status and stage.
+
+The unchanged September 27 source was then checked directly. Python's default
+User-Agent received HTTP 403 with `error code: 1010` from Cloudflare, for both
+HEAD and a 127-byte GET Range. With the identifying AniPals User-Agent, HEAD
+returned 200 and the original 86,753,200,519-byte length; strict Range requests
+returned 206, the exact requested Content-Range and the PMTiles v3 header.
+The source was still present; neither URL, size, SHA nor R2 object identity
+needed replacement. One identified request returned an unsuitable 200 and was
+not accepted as Range evidence. The implemented reader still rejects this
+response and preserves its original bounded retry and full SHA gates.
+
+`python3 tools/display_archive.py --check-source` now performs only this small
+source preflight, with no credentials or R2 access. A failed preflight during
+apply cannot create a multipart upload. Error records include a fixed stage,
+HTTP status where available, error class/recognized S3 code and abort outcome;
+response URLs, raw HTTP bodies and arbitrary exception messages are excluded.
+Readiness is not claimed until a subsequent cloud run completes all original
+full-object source and R2 integrity checks.
