@@ -77,3 +77,11 @@ No build/dispatch/push/deployment is implied by local tests. Deployment acceptan
 must separately prove native ABI compatibility, isolated regional installation,
 actual Toronto/Montreal routing, endpoint polygon filtering and bounded process
 behavior against the exact promoted image/release.
+
+
+The Canada native gate also runs `native_locate_smoke.py` against the candidate
+binary in both locate verbosity modes. Its raw protocol assertions and shared
+correlation-parser counts must pass before image publication. The helper and
+`native_scope_geometry.py` are explicit Docker inputs; the existing `tests/**`
+workflow filter includes both. This gate reuses Canada bytes and never needs a
+new global regional rebuild for a JSON protocol correction.

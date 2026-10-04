@@ -27,16 +27,25 @@ def encode(points):
 class NumericFactsTests(unittest.TestCase):
     def test_projection_distance_without_coordinate_or_edge_leak(self):
         value = locate_geometry([dict(edges=[
-            dict(projected=dict(lat=0,lon=.2), way_id="private-edge"),
-            dict(projected=dict(lat=0,lon=.1)),
-            dict(projected=dict(lat=float("nan"),lon=0)),
-            dict(projected=dict(lat=0,lon=999)),
+            dict(correlated_lat=0,correlated_lon=.2, way_id="private-edge"),
+            dict(correlated_lat=0,correlated_lon=.1),
+            dict(correlated_lat=float("nan"),correlated_lon=0),
+            dict(correlated_lat=0,correlated_lon=999),
         ])], dict(lat=0,lon=0))
         self.assertEqual(value["valid_projection_count"], 2)
         self.assertAlmostEqual(value["nearest_projection_m"], 11119.493, places=3)
         self.assertAlmostEqual(value["farthest_projection_m"], 22238.985, places=3)
         for forbidden in ('"lat"', '"lon"', "private-edge", "projected"):
             self.assertNotIn(forbidden, json.dumps(value, allow_nan=False))
+
+    def test_internal_projected_member_is_not_a_protocol_fallback(self):
+        old = [dict(edges=[dict(projected=dict(lat=0,lon=.1))])]
+        facts = locate_geometry(old, dict(lat=0,lon=0))
+        self.assertEqual(facts["valid_projection_count"], 0)
+        self.assertIsNone(facts["nearest_projection_m"])
+        for edge in (dict(correlated_lat=True,correlated_lon=0),
+                     dict(correlated_lat=0,correlated_lon=".1"),dict(correlated_lat=0)):
+            self.assertEqual(locate_geometry([dict(edges=[edge])],dict(lat=0,lon=0))["valid_projection_count"],0)
 
     def test_absence_and_bad_shapes_are_explicit_not_zero_distance(self):
         self.assertIsNone(locate_geometry([], dict(lat=0,lon=0))["nearest_projection_m"])
@@ -67,7 +76,7 @@ class NumericFactsTests(unittest.TestCase):
             def close(self): pass
             def request(self, region, action, payload):
                 if action=="status": return dict(version="3.3.0")
-                if action=="locate": return [dict(edges=[dict(projected=dict(lat=0,lon=.1))])]
+                if action=="locate": return [dict(edges=[dict(correlated_lat=0,correlated_lon=.1)])]
                 if payload["locations"][1]["lon"] < 0:
                     raise diagnostic.EngineError("raw secret",404,native_code=171,native_exit_code=1)
                 return dict(trip=dict(summary=dict(length=0),legs=[dict(shape=encode([(0,.1),(0,.1)]))]))

@@ -22,7 +22,7 @@ class ScopeDiagnosticTests(unittest.TestCase):
             def request(self,region,action,payload):
                 calls.append((action,copy.deepcopy(payload)))
                 if action=='status':return dict(version='3.3.0')
-                if action=='locate':return [dict(edges=[dict(way_id=7,projected=dict(lat=4.2,lon=27.2))])]
+                if action=='locate':return [dict(edges=[dict(way_id=7,correlated_lat=4.2,correlated_lon=27.2)])]
                 return dict(trip=dict(summary=dict(length=0),locations=payload['locations']))
             def close(self):calls.append(('close',{}))
         with tempfile.TemporaryDirectory() as folder:
@@ -37,6 +37,7 @@ class ScopeDiagnosticTests(unittest.TestCase):
             for forbidden in ('projected', 'requested', '"lat"', '"lon"', 'way_id'):
                 self.assertNotIn(forbidden,serialized)
             self.assertEqual(result['points'][0]['correlation']['edge_count'],1)
+            self.assertEqual(result['points'][0]['correlation']['valid_projection_count'],1)
 
     def test_distinguishes_no_edge_errors_and_refuses_existing_marker(self):
         class Fake:

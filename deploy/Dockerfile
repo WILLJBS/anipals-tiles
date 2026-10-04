@@ -22,6 +22,7 @@ COPY deploy/entrypoint.sh /usr/local/bin/anipals-entrypoint.sh
 COPY deploy/regional_*.py tools/validate_tiles.py /usr/local/lib/anipals/
 COPY tools/coverage.py /usr/local/lib/anipals/regional_coverage.py
 COPY tests/native_smoke.py /usr/local/lib/anipals/native_smoke.py
+COPY tests/native_locate_smoke.py tests/native_scope_geometry.py /usr/local/lib/anipals/
 COPY tests/native_diagnose.py /usr/local/lib/anipals/native_diagnose.py
 COPY tests/native_remote_smoke.py /usr/local/lib/anipals/native_remote_smoke.py
 COPY deploy/coverage.json /usr/local/share/anipals-coverage.json

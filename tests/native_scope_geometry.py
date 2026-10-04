@@ -20,7 +20,10 @@ def distance(a, b):
 def locate_geometry(response, requested):
     edges = response[0].get("edges") if isinstance(response, list) and response and isinstance(response[0], dict) else None
     origin = point(requested)
-    projections = [point(edge.get("projected")) for edge in edges if isinstance(edge, dict)] if isinstance(edges, list) else []
+    # 3.3.0 tyr/locate_serializer.cc emits flat correlated_* in both verbosity modes.
+    # "projected" is an internal C++ member, not a JSON response field.
+    projections = [point(dict(lat=edge.get("correlated_lat"), lon=edge.get("correlated_lon")))
+                   for edge in edges if isinstance(edge, dict)] if isinstance(edges, list) else []
     distances = [distance(origin, p) for p in projections if origin and p]
     return dict(valid_projection_count=len(distances), nearest_projection_m=min(distances) if distances else None,
                 farthest_projection_m=max(distances) if distances else None)

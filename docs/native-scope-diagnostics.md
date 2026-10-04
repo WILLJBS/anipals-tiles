@@ -40,3 +40,37 @@ navigation acceptance. No release-rescue implementation is included here.
 Raw PBF retention and real entrance evidence require separate acceptance.
 Rebuilding mutable latest data cannot claim to reproduce a lost historical
 graph. Product distance gates remain unchanged.
+
+
+## Locate protocol correction and native gate (2026-10-04)
+
+The real Venezuela diagnostic reported two correlated edges but zero parsed
+projections for every probe. This was a parser failure, not evidence that no
+projection existed. `tests/native_scope_geometry.py` had read `edge.projected`,
+and its invented fixtures repeated the same mistake. The pinned
+[Valhalla 3.3.0 serializer](https://github.com/valhalla/valhalla/blob/3.3.0/src/tyr/locate_serializer.cc#L74)
+emits flat `correlated_lat` and `correlated_lon` in both verbose and concise
+locate responses; `projected` is only its internal C++ member.
+
+The shared parser and all positive fixtures now use that external protocol.
+Old nested fields are a negative control, never a compatibility fallback.
+Existing artifacts are preserved: their zero projection counts cannot be used
+as absence or distance evidence. The independent decoded route-shape offsets
+remain valid; the Lander start offset was 2,296.115 m, and three offsets returned
+identical start/end shape points. This protocol fix does not require rebuilding
+that graph or alter source centers, native search settings or acceptance gates.
+
+`tests/native_locate_smoke.py` is copied with the shared geometry parser into
+the candidate image and called by the existing Canada native promotion gate.
+It sends actual `locate` requests through the pinned native engine for Toronto
+and Montreal, reusing already downloaded and verified Canada bytes. Both
+verbosity modes must return the exact input identity, nonempty edges with valid
+flat correlation coordinates, and a matching positive count from the same
+parser used by diagnostics. Only numeric summaries are printed. An unknown
+response shape blocks image publication; offline mocks alone are insufficient.
+Local tests verify the failure controls and wiring; a successful Linux native
+CI run is still required before claiming the actual protocol gate passed.
+
+Lesson: check external response fields against the pinned serializer and a
+real native response before writing fixtures. Internal member names and mocks
+that mirror the implementation do not establish a wire protocol.

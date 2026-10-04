@@ -150,3 +150,12 @@ Offline regressions cover projected distances, exact polyline6 decoding, duplica
 endpoints, malformed inputs, no coordinate disclosure, unchanged native error
 mapping and the actual shell's preservation of a failed gate exit status. Real
 Bakwa/Lander correlation results still require the next two-region diagnostic run.
+
+
+The subsequent Venezuela run supplied independent route-shape evidence, but
+its locate projection counts were invalid because the parser used an internal
+member name rather than the 3.3.0 JSON fields. See the
+[protocol correction and real native gate](native-scope-diagnostics.md#locate-protocol-correction-and-native-gate-2026-10-04).
+Do not use the old zero counts as projection absence or recompute historical
+results without the original response bytes. The route-shape offsets are
+independent of that parser error.
