@@ -17,9 +17,11 @@ from regional_gc import safe_path
 
 
 class EngineError(Exception):
-    def __init__(self, message, status=503):
+    def __init__(self, message, status=503, *, native_code=None, native_exit_code=None):
         super().__init__(message)
         self.status = status
+        self.native_code = native_code if type(native_code) is int else None
+        self.native_exit_code = native_exit_code if type(native_exit_code) is int else None
 
 
 class Engine:
@@ -116,8 +118,10 @@ class Engine:
                     failure = {}
                 code = failure.get('error_code') if isinstance(failure, dict) else None
                 if code in (170, 171, 172, 442, 443, 444):
-                    raise EngineError('no suitable route in regional graph', 404)
-                raise EngineError('native graph request failed')
+                    raise EngineError('no suitable route in regional graph', 404,
+                                      native_code=code, native_exit_code=child.returncode)
+                raise EngineError('native graph request failed', native_code=code,
+                                  native_exit_code=child.returncode)
             try:
                 result = json.loads(stdout)
             except (ValueError, UnicodeError):

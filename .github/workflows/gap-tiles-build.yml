@@ -100,6 +100,7 @@ jobs:
             source-lock.json
             input-provenance.json
             native-probes.json
+            native-scope-diagnostic.json
             tile-validation.json
   ready:
     timeout-minutes: 15

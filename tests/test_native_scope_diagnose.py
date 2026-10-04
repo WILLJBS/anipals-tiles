@@ -1,4 +1,5 @@
 import copy
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -32,18 +33,24 @@ class ScopeDiagnosticTests(unittest.TestCase):
             self.assertFalse(result['changes_to_source_or_acceptance'])
             self.assertFalse((Path(folder)/'.complete.json').exists())
             self.assertEqual(calls[-1][0],'close')
+            serialized=json.dumps(result)
+            for forbidden in ('projected', 'requested', '"lat"', '"lon"', 'way_id'):
+                self.assertNotIn(forbidden,serialized)
+            self.assertEqual(result['points'][0]['correlation']['edge_count'],1)
 
     def test_distinguishes_no_edge_errors_and_refuses_existing_marker(self):
         class Fake:
             def __init__(self,*args):pass
             def request(self,region,action,payload):
                 if action=='status':return dict(version='3.3.0')
-                raise EngineError('no suitable route in regional graph',404)
+                raise EngineError('private raw payload must not escape',404,native_code=171,native_exit_code=1)
             def close(self):pass
         with tempfile.TemporaryDirectory() as folder:
             probe,feature,validation=self.fixture();root=Path(folder)
             result=diagnose('congo',root/'tiles',probe,feature,validation,{},Fake)
             self.assertTrue(all(r['classification']=='native_error' and r['error_status']==404 for r in result['routes']))
+            self.assertTrue(all(r['native_code']==171 and r['native_exit_code']==1 for r in result['routes']))
+            self.assertNotIn('private raw payload',json.dumps(result))
             (root/'.complete.json').write_text('existing')
             with self.assertRaises(ValueError):diagnose('congo',root/'tiles',probe,feature,validation,{},Fake)
             self.assertEqual((root/'.complete.json').read_text(),'existing')
@@ -62,6 +69,9 @@ class ScopeDiagnosticTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, where):
                     diagnose('congo', Path(folder)/'tiles', probe, feature, validation, {}, Failing)
                 self.assertFalse((Path(folder)/'.complete.json').exists())
+                record=json.loads((Path(folder)/'native-scope-diagnostic.json').read_text())
+                self.assertEqual(record['kind'],'native-scope-diagnostic-not-acceptance')
+                self.assertNotIn('constructor',json.dumps(record))
 
 
 if __name__ == '__main__':unittest.main()

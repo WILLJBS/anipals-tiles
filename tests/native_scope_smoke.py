@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / 'deploy'))
 from regional_catalog import contains
 from regional_engine import Engine, EngineError
 from regional_release import canonical_hash
+from native_scope_records import OFFSETS, error_record, response_record
 
 
 def verify(slug, tiles, probes, geometry, report_path):
@@ -21,20 +22,37 @@ def verify(slug, tiles, probes, geometry, report_path):
     if marker.exists():
         raise ValueError('native gate refuses to overwrite an existing graph marker')
     marker.write_text(json.dumps(region))
-    engine = Engine(json.loads(subprocess.check_output(['valhalla_build_config'])), root / 'native-gate-config')
+    engine = None
     output = []
+    diagnostic = dict(schema=2, kind='native-scope-diagnostic-not-acceptance', slug=slug,
+        scope_sha256=canonical_hash(probes), graph_fingerprint=region['fingerprint'],
+        changes_to_source_or_acceptance=False, routes=[])
+    def request(action, payload, record):
+        try:
+            result = engine.request(region, action, payload)
+        except EngineError as error:
+            record.update(error_record(error))
+            raise
+        record.update(response_record(action, result))
+        return result
     try:
-        status = engine.request(region, 'status', {})
+        engine = Engine(json.loads(subprocess.check_output(['valhalla_build_config'])), root / 'native-gate-config')
+        diagnostic['status'] = {}
+        status = request('status', {}, diagnostic['status'])
         if status.get('version') != '3.3.0':
             raise ValueError('unexpected native ABI version')
         for probe in probes:
             lat, lon = probe['lat'], probe['lng']
-            for dy, dx in ((.002, .002), (.002, -.002), (-.002, .002), (-.002, -.002)):
-                if not contains(geometry, (lon+dx, lat+dy)):
+            for index, (dy, dx) in enumerate(OFFSETS):
+                inside = contains(geometry, (lon+dx, lat+dy))
+                record = dict(source_row=probe['source_row'], offset_index=index, inside_coverage=inside)
+                diagnostic['routes'].append(record)
+                if not inside:
+                    record['classification'] = 'outside_coverage'
                     continue
                 try:
-                    result = engine.request(region, 'route', dict(costing='pedestrian',
-                        locations=[dict(lat=lat, lon=lon), dict(lat=lat+dy, lon=lon+dx)]))
+                    result = request('route', dict(costing='pedestrian',
+                        locations=[dict(lat=lat, lon=lon), dict(lat=lat+dy, lon=lon+dx)]), record)
                 except EngineError as error:
                     if error.status == 404:
                         continue
@@ -45,9 +63,16 @@ def verify(slug, tiles, probes, geometry, report_path):
                     break
             else:
                 raise ValueError('no actual pedestrian route at declared gap city: ' + probe['name'])
+    except Exception as error:
+        diagnostic['failure'] = error_record(error) if isinstance(error, EngineError) else dict(classification='execution_error')
+        raise
     finally:
-        engine.close()
-        marker.unlink(missing_ok=True)
+        try:
+            if engine is not None:
+                engine.close()
+        finally:
+            marker.unlink(missing_ok=True)
+            (root/'native-scope-diagnostic.json').write_text(json.dumps(diagnostic, allow_nan=False)+'\n')
     return output
 
 
