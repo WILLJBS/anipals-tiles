@@ -74,3 +74,13 @@ CI run is still required before claiming the actual protocol gate passed.
 Lesson: check external response fields against the pinned serializer and a
 real native response before writing fixtures. Internal member names and mocks
 that mirror the implementation do not establish a wire protocol.
+
+## Resolution of the two failed regions (2026-10-07)
+
+The 2026-10-04 two-region failure is resolved through source-bound probe
+corrections, not moved centers or lower thresholds: Lander's probe is relocated
+to the city's reviewed navigation target, and Bakwa is registered as explicitly
+unavailable (no OSM highway within 21.27 km, zero candidate places). Both
+regions rebuild natively under the corrected registry; the unavailable proof
+entry is accepted only in its exact classified form. See
+`global-gap-builds.md` for the correction contract.

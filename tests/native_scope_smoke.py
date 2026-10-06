@@ -42,6 +42,13 @@ def verify(slug, tiles, probes, geometry, report_path):
         if status.get('version') != '3.3.0':
             raise ValueError('unexpected native ABI version')
         for probe in probes:
+            if probe.get('probe_correction') == 'scope_unavailable':
+                # Explicit reviewed unavailable scope: recorded, never routed, never verified.
+                diagnostic['routes'].append(dict(source_row=probe['source_row'], offset_index=None,
+                    inside_coverage=None, classification='scope_unavailable'))
+                output.append(dict(source_row=probe['source_row'], name=probe['name'],
+                    verified=False, classification='scope_unavailable'))
+                continue
             lat, lon = probe['lat'], probe['lng']
             for index, (dy, dx) in enumerate(OFFSETS):
                 inside = contains(geometry, (lon+dx, lat+dy))
@@ -89,7 +96,8 @@ def main():
     result = verify(args.slug, args.tiles, row['probes'], feature['geometry'], args.validation)
     Path(args.output).write_text(json.dumps(dict(slug=args.slug, native_version='3.3.0',
         scope_sha256=canonical_hash(row['probes']), probes=result), ensure_ascii=False) + '\n')
-    print(json.dumps(dict(slug=args.slug, verified_cities=len(result))))
+    print(json.dumps(dict(slug=args.slug, verified_cities=sum(1 for probe in result if probe.get('verified')),
+        unavailable_scopes=sum(1 for probe in result if probe.get('classification') == 'scope_unavailable'))))
 
 
 if __name__ == '__main__':

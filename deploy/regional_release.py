@@ -41,7 +41,13 @@ def validate_native_probes(manifest, feature, slug):
     ids = set()
     for result in probes:
         row, length = result.get('source_row'), result.get('distance_km')
-        if (type(row) is not int or row in ids or result.get('verified') is not True
+        if result.get('verified') is not True:
+            # The only non-verified proof entry is an explicit reviewed unavailable scope.
+            if (type(row) is int and row not in ids and result.get('classification') == 'scope_unavailable'
+                    and len(result) == 4 and type(result.get('name')) is str):
+                ids.add(row); continue
+            raise ValueError('missing, duplicate or invalid native source-row route')
+        if (type(row) is not int or row in ids
                 or type(length) not in (int, float) or not 0 < length < 5):
             raise ValueError('missing, duplicate or invalid native source-row route')
         ids.add(row)

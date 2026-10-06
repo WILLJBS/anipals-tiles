@@ -14,7 +14,47 @@ def city_record(city, position):
     return dict(source_row=position, name=city['name'], country=city.get('country'), lat=city['lat'], lng=city['lng'])
 
 
-def prepare(plan, index_bytes, cities_bytes, base_bytes, gap_spec, gap_coverage):
+CORRECTION_KINDS = ('verified_target_relocation', 'scope_unavailable')
+
+
+def load_corrections(corrections_bytes, cities):
+    value = json.loads(corrections_bytes)
+    if value.get('schema') != 1 or not isinstance(value.get('corrections'), list):
+        raise ValueError('native scope corrections schema differs')
+    applied = {}
+    for correction in value['corrections']:
+        row = correction.get('source_row'); kind = correction.get('kind')
+        original, probe = correction.get('original'), correction.get('probe')
+        if (type(row) is not int or not 0 <= row < len(cities) or row in applied
+                or kind not in CORRECTION_KINDS or not isinstance(correction.get('slug'), str)):
+            raise ValueError('invalid native scope correction entry')
+        city = cities[row]
+        if not isinstance(original, dict) or (original.get('lat'), original.get('lng')) != (city['lat'], city['lng']):
+            raise ValueError('correction original coordinate differs from frozen source row ' + str(row))
+        if kind == 'verified_target_relocation':
+            if not isinstance(probe, dict):
+                raise ValueError('relocation correction lacks a probe coordinate')
+            lat, lng = probe.get('lat'), probe.get('lng')
+            if type(lat) not in (int, float) or type(lng) not in (int, float) or not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                raise ValueError('relocation probe coordinate out of range')
+        if not isinstance(correction.get('basis'), dict):
+            raise ValueError('correction lacks source-bound basis evidence')
+        applied[row] = correction
+    return applied
+
+
+def apply_corrections(probes, corrections, owners):
+    for probe in probes:
+        correction = corrections.get(probe['source_row'])
+        if correction is None: continue
+        if owners.get(probe['source_row'], ('', ''))[1] != correction['slug']:
+            raise ValueError('correction slug differs from assigned graph scope')
+        if correction['kind'] == 'verified_target_relocation':
+            probe.update(lat=correction['probe']['lat'], lng=correction['probe']['lng'])
+        probe['probe_correction'] = correction['kind']
+
+
+def prepare(plan, index_bytes, cities_bytes, base_bytes, gap_spec, gap_coverage, corrections_bytes=b''):
     raw = dict(index=index_bytes, cities=cities_bytes, coverage=base_bytes)
     if {key: hashlib.sha256(value).hexdigest() for key, value in raw.items()} != plan['source_sha256']:
         raise ValueError('global build inputs differ from audited source hashes')
@@ -24,6 +64,7 @@ def prepare(plan, index_bytes, cities_bytes, base_bytes, gap_spec, gap_coverage)
     reproduced = compute_plan(cities, base, index)
     if reproduced != {key: value for key, value in plan.items() if key != 'source_sha256'}:
         raise ValueError('global plan does not reproduce from pinned source bytes')
+    corrections = load_corrections(corrections_bytes, cities) if corrections_bytes else {}
     gap_spec, gap_coverage = copy.deepcopy(gap_spec), copy.deepcopy(gap_coverage)
     gap_features = {f['properties']['slug']: f for f in gap_coverage['features']}
     source_features = {f['properties']['id']: f for f in index['features']}
@@ -58,6 +99,9 @@ def prepare(plan, index_bytes, cities_bytes, base_bytes, gap_spec, gap_coverage)
         for probe in probes:
             if probe['source_row'] in owners: raise ValueError('duplicate new graph assignment')
             owners[probe['source_row']] = owner
+    if corrections:
+        for builds in (gap_spec['builds'], scopes):
+            for scope_row in builds: apply_corrections(scope_row['probes'], corrections, owners)
     for row in gap_spec['builds']:
         row['probes'].sort(key=lambda p: p['source_row'])
     source_rows = []
@@ -78,6 +122,16 @@ def prepare(plan, index_bytes, cities_bytes, base_bytes, gap_spec, gap_coverage)
                   source_row_count=len(cities),
                   source_city_projection_sha256=digest([city_record(city,i) for i,city in enumerate(cities)]))
     coverage = build(index, roster, plan['source_sha256']['index'])
+    if corrections:
+        by_slug = {row['slug']: row['probes'] for row in scopes + gap_spec['builds']}
+        for feature in coverage['features'] + gap_coverage['features']:
+            props = feature['properties']
+            for probe in by_slug[props['slug']]:
+                if probe.get('probe_correction') != 'verified_target_relocation': continue
+                if not contains(feature['geometry'], (probe['lng'], probe['lat'])):
+                    raise ValueError('relocated probe outside its graph coverage: ' + props['slug'])
+        mapping['corrections_sha256'] = hashlib.sha256(corrections_bytes).hexdigest()
+        mapping['attribution'] += ' Probe corrections: reviewed source-bound overlays in deploy/global-scope-corrections.json.'
     def bind(roster_rows, features, builds):
         by_slug = {row['slug']: row['probes'] for row in builds}
         for feature in features:
@@ -97,11 +151,14 @@ def main():
     parser.add_argument('--cities', required=True); parser.add_argument('--base-coverage', default='deploy/coverage.json')
     parser.add_argument('--gap-spec', default='deploy/global-gap-sources.json')
     parser.add_argument('--gap-coverage', default='deploy/global-gap-coverage.json')
+    parser.add_argument('--corrections', default='deploy/global-scope-corrections.json')
     parser.add_argument('--output-dir', required=True)
     args = parser.parse_args()
+    corrections_bytes = Path(args.corrections).read_bytes() if args.corrections else b''
     values = prepare(json.loads(Path(args.plan).read_text()), Path(args.index).read_bytes(),
                      Path(args.cities).read_bytes(), Path(args.base_coverage).read_bytes(),
-                     json.loads(Path(args.gap_spec).read_text()), json.loads(Path(args.gap_coverage).read_text()))
+                     json.loads(Path(args.gap_spec).read_text()), json.loads(Path(args.gap_coverage).read_text()),
+                     corrections_bytes)
     output = Path(args.output_dir); output.mkdir(parents=True, exist_ok=True)
     names = ('global-additions.json', 'global-additions-coverage.json', 'global-additions-scopes.json',
              'global-gap-sources.json', 'global-gap-coverage.json', 'global-gap-regions.json')

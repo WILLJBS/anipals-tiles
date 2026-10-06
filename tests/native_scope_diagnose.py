@@ -44,6 +44,9 @@ def diagnose(slug, tiles, probe, feature, validation, template, engine_factory=E
         result['status'] = request('status', {})
         if result['status'].get('native_version') != '3.3.0':
             raise ValueError('diagnostic native ABI differs from pinned 3.3.0')
+        if probe.get('probe_correction') == 'scope_unavailable':
+            result['scope_unavailable'] = True
+            return result
         origin = dict(lat=probe['lat'], lon=probe['lng'])
         points = [origin] + [dict(lat=probe['lat']+dy, lon=probe['lng']+dx) for dy, dx in OFFSETS]
         for index, point in enumerate(points):

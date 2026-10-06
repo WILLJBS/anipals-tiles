@@ -106,3 +106,28 @@ registered `deploy-image.yml` can accept an explicit source SHA. Remote event,
 workflow-enable and token provenance evidence is needed to diagnose a missing
 staging run. This review does not change trigger filters or bypass deployment
 checks.
+
+## Source-bound probe corrections (2026-10-07)
+
+Two additions builds failed their native scope gate in run `37230324325`
+(2026-10-04): Venezuela at Lander (start correlation 2,296.115 m, three
+collapsed offsets) and Congo DR at Bakwa (start correlation 21,269.431 m, four
+zero-length routes). The GeoNames projection itself stays frozen and pinned by
+`source_city_projection_sha256`; probes are corrected only through the reviewed
+overlay `deploy/global-scope-corrections.json`, applied by
+`prepare_global_build.py`, re-proven by `check_global_build.py`, and locked into
+the scope mapping by `corrections_sha256`.
+
+- Lander (row 3457): `verified_target_relocation`. The declared coordinate sits
+  2,296 m from the nearest routable edge; the probe is bound to the city scope's
+  reviewed navigation target (published `rule:category-public-places-v1`,
+  the same coordinate the H03 acceptance plan navigates to).
+- Bakwa (row 6087): `scope_unavailable`. OSM has no highway within 21.27 km and
+  the global collection found zero candidate places, so no legitimate target can
+  exist today. The scope smoke records the scope as unavailable without routing
+  it; `validate_native_probes` accepts only the exact four-field unavailable
+  proof entry alongside fully verified routes.
+
+Both regions require a full rebuild under the corrected registry; no snap
+distance, threshold, or city center moved. Other regions' coverage features are
+byte-identical, so their existing draft assets and manifests remain valid.

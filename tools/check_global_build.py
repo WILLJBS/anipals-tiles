@@ -6,8 +6,10 @@ import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'deploy'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from coverage import digest, validate
 from regional_catalog import contains, locations
+from prepare_global_build import apply_corrections, load_corrections
 
 FIELDS = ('source_row', 'name', 'country', 'lat', 'lng')
 
@@ -20,6 +22,12 @@ def validate_inputs(root):
     mapping = json.loads(mapping_bytes)
     if hashlib.sha256(mapping_bytes).hexdigest() != roster['scope_file_sha256']:
         raise ValueError('source-scope mapping byte SHA256 mismatch')
+    corrections_path = root/'global-scope-corrections.json'
+    if mapping.get('corrections_sha256'):
+        if hashlib.sha256(corrections_path.read_bytes()).hexdigest() != mapping['corrections_sha256']:
+            raise ValueError('native scope corrections byte SHA256 mismatch')
+    elif corrections_path.exists():
+        raise ValueError('corrections file present without a mapping corrections digest')
     base_bytes = (root/'coverage.json').read_bytes()
     if hashlib.sha256(base_bytes).hexdigest() != mapping['source_sha256']['coverage']:
         raise ValueError('old local coverage source changed')
@@ -36,12 +44,19 @@ def validate_inputs(root):
         raise ValueError('source-city projection changed from generated inputs')
     if [r['source_row'] for r in rows] != list(range(len(rows))):
         raise ValueError('source rows missing, reordered or duplicated')
+    corrections = load_corrections(corrections_path.read_bytes(), rows) if mapping.get('corrections_sha256') else {}
+    owners = {row['source_row']: (row['delivery'], row['scope']) for row in rows}
     grouped = {}
     for row in rows:
         shape = all_features[row['delivery']][row['scope']]['geometry']
         points = locations(dict(costing='pedestrian', locations=[dict(lat=row['lat'], lon=row['lng'])]*2))
         if not contains(shape, points[0]): raise ValueError('source coordinate outside assigned graph')
-        grouped.setdefault((row['delivery'],row['scope']), []).append({key: row[key] for key in FIELDS})
+        entry = {key: row[key] for key in FIELDS}
+        apply_corrections([entry], corrections, owners)
+        if entry.get('probe_correction') == 'verified_target_relocation':
+            moved = locations(dict(costing='pedestrian', locations=[dict(lat=entry['lat'], lon=entry['lng'])]*2))
+            if not contains(shape, moved[0]): raise ValueError('relocated probe outside assigned graph')
+        grouped.setdefault((row['delivery'],row['scope']), []).append(entry)
     for delivery, builds in [('addition', mapping['builds']), ('gap', gaps['builds'])]:
         if {row['slug'] for row in builds} != set(all_features[delivery]):
             raise ValueError('native scope registry differs from graph roster')

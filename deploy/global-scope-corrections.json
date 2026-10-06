@@ -1,0 +1,38 @@
+{
+ "schema": 1,
+ "comment": "Source-bound native-scope probe corrections applied by prepare_global_build after the frozen GeoNames projection. The source-city projection digest keeps pinning the unmodified source coordinates; every change to a native probe is explicit here, validated by check_global_build, and requires a full affected-region rebuild. No acceptance threshold is altered.",
+ "corrections": [
+  {
+   "source_row": 3457,
+   "slug": "south-america-venezuela",
+   "kind": "verified_target_relocation",
+   "original": {"lat": 10.1833, "lng": -66.7},
+   "probe": {"lat": 10.42542476, "lng": -66.78627871},
+   "basis": {
+    "kind": "published-navigation-target",
+    "placeId": "5388e6f3-16c9-51ef-8cee-f13b15078491",
+    "canonicalKey": "overture:ace278eb-6070-4ef5-8896-ed3c6c7da339",
+    "publication": "approved",
+    "publicationBasis": "rule:category-public-places-v1",
+    "reviewedBy": "rule:category-public-places-v1:c30aa336bc7b4632855208d5758e7adda6dd4e9fc55e371d2c55c0354ddf53da",
+    "acceptancePlan": "global-navigation-acceptance-v1 signature 76ae168fcb9075d87376 (city case lander, ready_to_test, same target coordinate)",
+    "note": "GeoNames 3637012 declares Lander 2,296.115 m from the nearest routable edge (native-scope-diagnostic, run 37230324325, 2026-10-04). The city scope's reviewed navigation target is the routable coordinate the product actually navigates to; the probe is bound to it instead of an unroutable rural point."
+   }
+  },
+  {
+   "source_row": 6087,
+   "slug": "africa-congo-democratic-republic",
+   "kind": "scope_unavailable",
+   "original": {"lat": 4.1263, "lng": 27.3953},
+   "basis": {
+    "kind": "no_routable_road_no_verified_target",
+    "nearestRoadWayId": 868069668,
+    "nearestRoadDistanceM": 21270.5,
+    "roadSurveySha256": "50bbe3dbfc1954a50cd1882fa407e7eca191c6984e624b26e6f47eb31f76cf88",
+    "nativeDiagnostic": "native-scope-diagnostic, run 37230324325, 2026-10-04: four zero-length route offsets, start correlation 21,269.431 m",
+    "acceptancePlan": "global-navigation-acceptance-v1 signature 76ae168fcb9075d87376 (city case bakwa, snapshot_scope_not_complete, 0 verified targets)",
+    "note": "OSM has no highway within 21.27 km of the declared Bakwa coordinate and the H03 collection found zero candidate places, so no legitimate navigation target can exist there today. The scope is explicitly unavailable like the other documented scopes; the graph stays supplied and every other probe in this build is natively verified."
+   }
+  }
+ ]
+}

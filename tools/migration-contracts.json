@@ -1,59 +1,59 @@
 {
-  "schema": 1,
-  "contracts": {
-    "original61": {
-      "regions": 61,
-      "native_version": "3.3.0",
-      "files": {
-        "roster": {
-          "path": "deploy/regions.json",
-          "sha256": "cb2347ba5ea15a14986b4ca8d257227486a9b62d2556db8e055e27e169c81cb4"
-        },
-        "coverage": {
-          "path": "deploy/coverage.json",
-          "sha256": "01f216976ee2399a3eea85f21602c3820447c00f4a566a318436f9aab39bdcc8"
-        },
-        "image": {
-          "path": "deploy/valhalla-image.txt",
-          "sha256": "d7167b99ac0298e743ea204955886edc2e1712e72b201e6eea8c06714f6eebf8"
-        }
-      }
+ "schema": 1,
+ "contracts": {
+  "original61": {
+   "regions": 61,
+   "native_version": "3.3.0",
+   "files": {
+    "roster": {
+     "path": "deploy/regions.json",
+     "sha256": "cb2347ba5ea15a14986b4ca8d257227486a9b62d2556db8e055e27e169c81cb4"
     },
-    "gap3": {
-      "regions": 3,
-      "native_version": "3.3.0",
-      "files": {
-        "roster": {
-          "path": "deploy/global-gap-regions.json",
-          "sha256": "0e8e6a260a92b78f706bf27d5e1e5b72711e787000359de999c614b6dfcd91a1"
-        },
-        "coverage": {
-          "path": "deploy/global-gap-coverage.json",
-          "sha256": "9338b2fcea7fb5188aef07eeb836ecc855deecfec420af7ca7271b57332d6106"
-        },
-        "image": {
-          "path": "deploy/valhalla-image.txt",
-          "sha256": "d7167b99ac0298e743ea204955886edc2e1712e72b201e6eea8c06714f6eebf8"
-        }
-      }
+    "coverage": {
+     "path": "deploy/coverage.json",
+     "sha256": "01f216976ee2399a3eea85f21602c3820447c00f4a566a318436f9aab39bdcc8"
     },
-    "additions129": {
-      "regions": 129,
-      "native_version": "3.3.0",
-      "files": {
-        "roster": {
-          "path": "deploy/global-additions.json",
-          "sha256": "22666f4355ed0a3b3e8ce6a8a828c79beabf00f90812c2352833cb87e55c87fb"
-        },
-        "coverage": {
-          "path": "deploy/global-additions-coverage.json",
-          "sha256": "87bb6dabcc0977bf0b49f0f52b71d11a925331196e43ca697affffd467504c5d"
-        },
-        "image": {
-          "path": "deploy/valhalla-image.txt",
-          "sha256": "d7167b99ac0298e743ea204955886edc2e1712e72b201e6eea8c06714f6eebf8"
-        }
-      }
+    "image": {
+     "path": "deploy/valhalla-image.txt",
+     "sha256": "d7167b99ac0298e743ea204955886edc2e1712e72b201e6eea8c06714f6eebf8"
     }
+   }
+  },
+  "gap3": {
+   "regions": 3,
+   "native_version": "3.3.0",
+   "files": {
+    "roster": {
+     "path": "deploy/global-gap-regions.json",
+     "sha256": "0e8e6a260a92b78f706bf27d5e1e5b72711e787000359de999c614b6dfcd91a1"
+    },
+    "coverage": {
+     "path": "deploy/global-gap-coverage.json",
+     "sha256": "9338b2fcea7fb5188aef07eeb836ecc855deecfec420af7ca7271b57332d6106"
+    },
+    "image": {
+     "path": "deploy/valhalla-image.txt",
+     "sha256": "d7167b99ac0298e743ea204955886edc2e1712e72b201e6eea8c06714f6eebf8"
+    }
+   }
+  },
+  "additions129": {
+   "regions": 129,
+   "native_version": "3.3.0",
+   "files": {
+    "roster": {
+     "path": "deploy/global-additions.json",
+     "sha256": "919227e3398bb3dffd57d7e92d5b9ab13bedc8b763c52c097c0d5687cc6fe654"
+    },
+    "coverage": {
+     "path": "deploy/global-additions-coverage.json",
+     "sha256": "145ff1987b6dabfa1f904e6a36bfb33988f337df660bf8fd41554cc2315b42e1"
+    },
+    "image": {
+     "path": "deploy/valhalla-image.txt",
+     "sha256": "d7167b99ac0298e743ea204955886edc2e1712e72b201e6eea8c06714f6eebf8"
+    }
+   }
   }
+ }
 }

@@ -6,6 +6,18 @@ on:
       tag:
         description: 'Exact target draft release tag'
         required: true
+      roster:
+        description: 'Reviewed repository roster JSON; defaults to unchanged local regions'
+        required: false
+        default: 'deploy/regions.json'
+      coverage:
+        description: 'Exact coverage JSON matching the reviewed roster'
+        required: false
+        default: 'deploy/coverage.json'
+      source_tag:
+        description: 'Optional draft to copy missing region assets from; differing manifests refuse'
+        required: false
+        default: ''
 permissions:
   contents: write
 concurrency:
@@ -15,6 +27,9 @@ jobs:
   publish:
     timeout-minutes: 15
     runs-on: ubuntu-latest
+    env:
+      REGION_ROSTER_FILE: ${{ github.event.inputs.roster || 'deploy/regions.json' }}
+      REGION_COVERAGE_FILE: ${{ github.event.inputs.coverage || 'deploy/coverage.json' }}
     steps:
       - uses: actions/checkout@v4
       - name: Resolve target draft
@@ -41,24 +56,50 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.diag.outputs.tag }}
+          SOURCE_TAG: ${{ github.event.inputs.source_tag }}
         run: |
           set -e -o pipefail
           exec 2> >(tee /tmp/trace.log >&2)
           set -x
-          # Count from the already-fetched releases list: gh api releases/tags
-          # NEVER returns drafts (the original `final` job's failure), so every
-          # draft lookup must come from this list instead.
+          [[ "$REGION_ROSTER_FILE" =~ ^deploy/[a-z0-9-]+\.json$ ]] || { echo "invalid roster"; exit 2; }
+          [[ "$REGION_COVERAGE_FILE" =~ ^deploy/[a-z0-9-]+\.json$ ]] || { echo "invalid coverage"; exit 2; }
+          # Optional assembly: copy region assets from a reviewed source draft into
+          # the target. Assets already present are kept; a differing manifest of the
+          # same name is a conflicting graph identity and refuses the publish.
+          if [ -n "$SOURCE_TAG" ]; then
+            [[ "$SOURCE_TAG" =~ ^tiles-[A-Za-z0-9.-]+$ ]] || { echo "invalid source tag"; exit 2; }
+            jq -e --arg t "$SOURCE_TAG" '.[] | select(.draft and .tag_name == $t)' /tmp/releases.json > /dev/null
+            gh release download "$SOURCE_TAG" --pattern 'manifest-*.json' --pattern 'tiles-*.tar-*' \
+              --dir incoming --repo "$GITHUB_REPOSITORY"
+            mkdir -p existing && gh release download "$TAG" --pattern 'manifest-*.json' --dir existing --repo "$GITHUB_REPOSITORY"
+            for manifest in incoming/manifest-*.json; do
+              name=$(basename "$manifest")
+              if [ -f "existing/$name" ] && ! cmp -s "$manifest" "existing/$name"; then
+                echo "conflicting manifest identity: $name"; exit 2
+              fi
+              gh release upload "$TAG" "$manifest" --repo "$GITHUB_REPOSITORY"
+            done
+            for part in incoming/tiles-*.tar-*; do
+              # No --clobber: a pre-existing part name is a conflicting graph asset.
+              gh release upload "$TAG" "$part" --repo "$GITHUB_REPOSITORY"
+            done
+          fi
+          # Re-fetch after assembly: gh api releases/tags NEVER returns drafts, so
+          # the fresh full list is the only truthful asset + draft view.
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/releases-after.json
           SLUGS=$(jq -r --arg t "$TAG" \
             '.[] | select(.draft and .tag_name == $t)
               | [.assets[] | select(.name | endswith(".tar-00"))] | length' \
-            /tmp/releases.json)
-          MIN=$(python3 -c "import json; print(len(json.load(open('deploy/regions.json'))['region']))")
+            /tmp/releases-after.json)
+          python3 tools/coverage.py --roster "$REGION_ROSTER_FILE" --output "$REGION_COVERAGE_FILE"
+          MIN=$(python3 -c "import json,os; print(len(json.load(open(os.environ['REGION_ROSTER_FILE']))['region']))")
           echo "country slugs: $SLUGS (required $MIN)"
           [ "$SLUGS" -ge "$MIN" ] || { echo "incomplete supply — refusing to publish"; exit 2; }
           gh release download "$TAG" --pattern 'manifest-*.json' --dir manifests --repo "$GITHUB_REPOSITORY"
-          jq --arg t "$TAG" '.[] | select(.draft and .tag_name == $t)' /tmp/releases.json > release-assets.json
-          python3 tools/release_manifest.py ready release-assets.json manifests/*.json > READY
-          if ! OUT=$(gh release upload "$TAG" READY deploy/coverage.json --clobber --repo "$GITHUB_REPOSITORY" 2>&1); then
+          jq --arg t "$TAG" '.[] | select(.draft and .tag_name == $t)' /tmp/releases-after.json > release-assets.json
+          python3 tools/release_manifest.py ready --roster "$REGION_ROSTER_FILE" --coverage "$REGION_COVERAGE_FILE" \
+            release-assets.json manifests/*.json > READY
+          if ! OUT=$(gh release upload "$TAG" READY "$REGION_COVERAGE_FILE" --clobber --repo "$GITHUB_REPOSITORY" 2>&1); then
             echo "upload READY failed: $OUT" >> /tmp/diag.md; exit 3; fi
           if ! OUT=$(gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY" 2>&1); then
             echo "publish (edit --draft=false) failed: $OUT" >> /tmp/diag.md; exit 4; fi
