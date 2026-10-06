@@ -97,8 +97,8 @@ jobs:
           [ "$SLUGS" -ge "$MIN" ] || { echo "incomplete supply — refusing to publish"; exit 2; }
           gh release download "$TAG" --pattern 'manifest-*.json' --dir manifests --repo "$GITHUB_REPOSITORY"
           jq --arg t "$TAG" '.[] | select(.draft and .tag_name == $t)' /tmp/releases-after.json > release-assets.json
-          python3 tools/release_manifest.py ready --roster "$REGION_ROSTER_FILE" --coverage "$REGION_COVERAGE_FILE" \
-            release-assets.json manifests/*.json > READY
+          python3 tools/release_manifest.py --roster "$REGION_ROSTER_FILE" --coverage "$REGION_COVERAGE_FILE" \
+            ready release-assets.json manifests/*.json > READY
           if ! OUT=$(gh release upload "$TAG" READY "$REGION_COVERAGE_FILE" --clobber --repo "$GITHUB_REPOSITORY" 2>&1); then
             echo "upload READY failed: $OUT" >> /tmp/diag.md; exit 3; fi
           if ! OUT=$(gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY" 2>&1); then
