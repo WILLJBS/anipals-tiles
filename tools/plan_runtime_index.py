@@ -34,7 +34,7 @@ def main():
     planner.add_argument('--output-directory', type=Path, required=True)
     args = parser.parse_args()
     if args.action == 'inventory':
-        result = capture(args.volume_root, decode(args.regions_json), load_profile('original61')['image'], args.target_identity_sha)
+        result = capture(args.volume_root, decode(args.regions_json.read_bytes()), load_profile('original61')['image'], args.target_identity_sha)
         raw = canonical_bytes(result); write_private(args.output, raw)
         print(json.dumps(dict(event='PRIVATE_TARGET_INVENTORY_OBSERVED', sha256=hashlib.sha256(raw).hexdigest(),
                               bytes=len(raw), local_regions=len(result['regions']), native_rollback_verified=False)))
