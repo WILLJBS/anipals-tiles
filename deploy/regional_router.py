@@ -191,7 +191,10 @@ def main():
         from regional_remote_runtime import RemoteRuntime
         remote = RemoteRuntime(args.data_root, coverage)
         coverage = remote.composite.coverage
+    # Native one-shot slots default to 2 (production discipline: bounded memory
+    # and CPU per box); bulk consumers like the sweeper instance opt in higher.
     engine = Engine(json.loads(Path(args.config).read_text()), '/tmp/anipals-native',
+                    concurrency=max(1, int(os.environ.get('ANIPALS_ENGINE_CONCURRENCY', '2'))),
                     bridge=remote.bridge if remote else None)
     router = Router(Catalog(args.data_root, coverage),
                     engine, json.loads(Path(args.probes).read_text()))
