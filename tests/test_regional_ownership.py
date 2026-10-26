@@ -119,10 +119,21 @@ class OwnershipTests(unittest.TestCase):
             if fault=='catalog':changed['catalog_sha256']='wrong'
             with self.subTest(fault=fault),self.assertRaises(ValueError):load(self.base,changed,self.manifest)
     def test_preflight_rejects_missing_rollback_before_any_ownership_mutation(self):
-        owners=copy.deepcopy(self.index['storage_ownership']);owners['z-missing']=copy.deepcopy(owners['local'])
+        owners=copy.deepcopy(self.index['storage_ownership'])
+        # Directory retained but marker missing is genuine corruption: preflight
+        # must reject before any ownership mutation.
+        (self.parent/('a'*64)/'.complete.json').unlink()
         with self.assertRaises(FileNotFoundError):ownership.install_many(self.root,owners,self.composite.digest,None)
         self.assertFalse((self.parent/'ownership.json').exists())
         self.assertEqual(gc.read_pointer(self.parent)['fingerprint'],'a'*64)
+    def test_fresh_disk_without_materialized_rollback_installs(self):
+        owners=copy.deepcopy(self.index['storage_ownership']);owners['z-fresh']=copy.deepcopy(owners['local'])
+        # A region whose rollback graph was never materialized on this disk
+        # (fresh boot or remote-only replica) installs without the retained marker.
+        ownership.install_many(self.root,owners,self.composite.digest,None)
+        fresh=self.root/'regions/z-fresh'
+        self.assertTrue((fresh/'ownership.json').exists())
+        self.assertIsNone(gc.read_pointer(fresh))
     def test_malformed_durable_control_fails_closed(self):
         self.activate_remote();path=self.parent/'ownership.json';original=json.loads(path.read_text())
         for change in ({'schema':True},{'active':{}},{'active':{'fingerprint':'a'*64,'release':None}},

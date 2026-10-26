@@ -95,7 +95,12 @@ def checked_marker(parent, wanted):
 
 def prepared_control(parent, owner, digest, previous):
     current = read_control(parent)
-    if owner['rollback'] is not None:
+    # A retained rollback graph is only enforceable where it was ever
+    # materialized: a fresh disk (or a remote-only replica) legitimately has
+    # none, so the fingerprint directory being wholly absent degrades the plan
+    # to "nothing to roll back to" instead of failing boot. A present-but-broken
+    # directory still fails checked_marker as genuine corruption.
+    if owner['rollback'] is not None and (parent/owner['rollback']['fingerprint']).exists():
         checked_marker(parent, owner['rollback'])
     if owner['selected']['storage'] == 'local':
         checked_marker(parent, owner['selected'])
